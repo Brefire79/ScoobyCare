@@ -80,31 +80,138 @@ const notify = async (msg) => {
    Modal de Data (dose/ação)
 --------------------------------- */
 let _dateDialogResolver = null;
+
+const isValidISO = (iso) => /^\d{4}-\d{2}-\d{2}$/.test(String(iso||""));
+const clampISO = (iso) => (isValidISO(iso) ? iso : todayISO());
+const monthLabel = (year, monthIndex0) => {
+  const meses = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  return `${meses[monthIndex0]} ${year}`;
+};
+const daysInMonth = (y, m0) => new Date(y, m0 + 1, 0).getDate();
+
 const openDateDialog = ({ title = "Selecionar data", sub = "Escolha a data do registro.", defaultISO = todayISO() } = {}) => {
   const dlg = document.getElementById("date-dialog");
   const input = document.getElementById("date-dialog-input");
   const t = document.getElementById("date-dialog-title");
   const s = document.getElementById("date-dialog-sub");
-  if (!dlg || !input) {
-    // fallback simples
+  const grid = document.getElementById("dp-grid");
+  const monthEl = document.getElementById("dp-month");
+  const prev = document.getElementById("dp-prev");
+  const next = document.getElementById("dp-next");
+
+  const fallback = () => {
     const raw = prompt(`${title}\n${sub}\n(YYYY-MM-DD)`, defaultISO);
     return Promise.resolve(raw || null);
-  }
+  };
+
+  if (!dlg || !input || !grid || !monthEl || !prev || !next) return fallback();
 
   t && (t.textContent = title);
   s && (s.textContent = sub);
-  input.value = defaultISO;
+
+  let selectedISO = clampISO(defaultISO);
+  input.value = selectedISO;
+
+  // mês em exibição
+  let view = asLocalDate(selectedISO);
+  view = new Date(view.getFullYear(), view.getMonth(), 1);
+
+  const render = () => {
+    const y = view.getFullYear();
+    const m0 = view.getMonth();
+    monthEl.textContent = monthLabel(y, m0);
+
+    const firstDow = new Date(y, m0, 1).getDay(); // 0=dom
+    const total = daysInMonth(y, m0);
+
+    // grid 6 semanas * 7 = 42
+    const cells = [];
+    // dias do mês anterior para preencher
+    const prevMonthDays = daysInMonth(y, m0 - 1 < 0 ? 11 : m0 - 1);
+    for (let i = 0; i < firstDow; i++) {
+      const day = prevMonthDays - (firstDow - 1 - i);
+      cells.push({ y, m0: m0 - 1, day, muted: true });
+    }
+    for (let d = 1; d <= total; d++) cells.push({ y, m0, day: d, muted: false });
+    while (cells.length < 42) {
+      const idx = cells.length - (firstDow + total);
+      cells.push({ y, m0: m0 + 1, day: idx + 1, muted: true });
+    }
+
+    const today = todayISO();
+    const sel = selectedISO;
+
+    grid.innerHTML = cells.map((c) => {
+      const dt = new Date(c.y, c.m0, c.day);
+      const yy = dt.getFullYear();
+      const mm = String(dt.getMonth() + 1).padStart(2, "0");
+      const dd = String(dt.getDate()).padStart(2, "0");
+      const iso = `${yy}-${mm}-${dd}`;
+      const cls = [
+        "dp-day",
+        c.muted ? "muted" : "",
+        iso === today ? "today" : "",
+        iso === sel ? "selected" : ""
+      ].filter(Boolean).join(" ");
+      return `<button type="button" class="${cls}" data-iso="${iso}">${dt.getDate()}</button>`;
+    }).join("");
+  };
+
+  const syncFromInput = () => {
+    const v = (input.value || "").trim();
+    if (!isValidISO(v)) return;
+    selectedISO = v;
+    view = asLocalDate(selectedISO);
+    view = new Date(view.getFullYear(), view.getMonth(), 1);
+    render();
+  };
+
+  const onGridClick = (e) => {
+    const b = e.target.closest("button[data-iso]");
+    if (!b) return;
+    selectedISO = b.dataset.iso;
+    input.value = selectedISO;
+    render();
+  };
+
+  const onPrev = (e) => {
+    e.preventDefault();
+    view = new Date(view.getFullYear(), view.getMonth() - 1, 1);
+    render();
+  };
+  const onNext = (e) => {
+    e.preventDefault();
+    view = new Date(view.getFullYear(), view.getMonth() + 1, 1);
+    render();
+  };
+
+  render();
 
   return new Promise((resolve) => {
     _dateDialogResolver = resolve;
+
+    grid.addEventListener("click", onGridClick);
+    prev.addEventListener("click", onPrev);
+    next.addEventListener("click", onNext);
+    input.addEventListener("change", syncFromInput);
+
     dlg.showModal();
 
     const onClose = () => {
       dlg.removeEventListener("close", onClose);
+
+      grid.removeEventListener("click", onGridClick);
+      prev.removeEventListener("click", onPrev);
+      next.removeEventListener("click", onNext);
+      input.removeEventListener("change", syncFromInput);
+
       const v = dlg.returnValue;
       if (v !== "ok") return resolve(null);
-      resolve(input.value || null);
+
+      const val = (input.value || "").trim();
+      resolve(isValidISO(val) ? val : selectedISO);
     };
+
     dlg.addEventListener("close", onClose, { once: true });
   });
 };
@@ -115,43 +222,113 @@ const openDateDialog = ({ title = "Selecionar data", sub = "Escolha a data do re
    sem interação do usuário.
 --------------------------------- */
 const BEEP_WAV =
-  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="; // fallback curtinho
 
-const playBeep = async () => {
+let _audioCtx = null;
+const getAudioCtx = async () => {
+  if (_audioCtx) return _audioCtx;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  _audioCtx = new Ctx();
+  if (_audioCtx.state === "suspended") {
+    try { await _audioCtx.resume(); } catch {}
+  }
+  return _audioCtx;
+};
+
+const playTone = async (freq = 660, ms = 160) => {
+  const ctx = await getAudioCtx();
+  if (!ctx) {
+    try {
+      const a = new Audio(BEEP_WAV);
+      a.volume = 0.9;
+      await a.play();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   try {
-    const a = new Audio(BEEP_WAV);
-    a.volume = 0.9;
-    await a.play();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "sine";
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + (ms / 1000));
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + (ms / 1000) + 0.02);
     return true;
   } catch {
     return false;
   }
 };
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const patternFor = (kind) => {
+  // sons diferentes por categoria (operacional e fácil de reconhecer)
+  if (kind === "med") return [{ f: 520, d: 220 }, { gap: 90 }, { f: 520, d: 220 }];           // duplo grave
+  if (kind === "vac") return [{ f: 880, d: 160 }, { gap: 70 }, { f: 1040, d: 160 }];         // duplo agudo
+  if (kind === "routine") return [{ f: 740, d: 120 }, { gap: 70 }, { f: 740, d: 120 }, { gap: 70 }, { f: 740, d: 120 }]; // triplo
+  return [{ f: 660, d: 160 }];
+};
+
+const playPattern = async (kind) => {
+  const seq = patternFor(kind);
+  let ok = false;
+  for (const step of seq) {
+    if (step.gap) { await sleep(step.gap); continue; }
+    ok = (await playTone(step.f, step.d)) || ok;
+    await sleep(40);
+  }
+  return ok;
+};
+
 const shouldPlaySoundFor = (events) => {
   const s = AppState.settings?.soundAlerts || {};
-  if (!s.enabled) return false;
+  if (!s.enabled) return { should: false, toPlay: [] };
 
-  const hasUrgent = events.some(e => e.status.className === "late" || e.status.className === "soon");
-  if (!hasUrgent) return false;
+  // urgentes = vencidos primeiro, depois vencendo
+  const urgent = events
+    .filter(e => e.date && (e.status.className === "late" || e.status.className === "soon"))
+    .sort((a, b) => {
+      const wa = a.status.className === "late" ? 0 : 1;
+      const wb = b.status.className === "late" ? 0 : 1;
+      if (wa !== wb) return wa - wb;
+      return asLocalDate(a.date) - asLocalDate(b.date);
+    });
+
+  if (!urgent.length) return { should: false, toPlay: [] };
 
   const today = todayISO();
-  if (s.lastPlayedISO === today) return false; // toca no máx 1x/dia (pra não enlouquecer)
-  return true;
+  s.lastPlayedByItemISO = s.lastPlayedByItemISO || {};
+
+  const fresh = urgent.filter(e => s.lastPlayedByItemISO[e.id] !== today);
+
+  if (!fresh.length) return { should: false, toPlay: [] };
+
+  // toca no máx 3 itens por rodada
+  return { should: true, toPlay: fresh.slice(0, 3) };
 };
 
 const maybePlaySoundAlerts = async (events) => {
-  if (!shouldPlaySoundFor(events)) return;
+  const s = AppState.settings?.soundAlerts || {};
+  const verdict = shouldPlaySoundFor(events);
+  if (!verdict.should) return;
 
-  const ok = await playBeep();
-  if (ok) {
-    AppState.settings.soundAlerts.lastPlayedISO = todayISO();
-    AppState.settings.soundAlerts.unlocked = true;
-    saveState();
-  } else {
-    // se bloqueou, avisa sem encher
-    if (!AppState.settings?.soundAlerts?.unlocked) {
-      showToast("Som bloqueado. Ative em Ajustes e toque em 'Testar som'.");
+  for (const e of verdict.toPlay) {
+    const ok = await playPattern(e.kind);
+    if (ok) {
+      s.lastPlayedByItemISO = s.lastPlayedByItemISO || {};
+      s.lastPlayedByItemISO[e.id] = todayISO();
+      AppState.settings.soundAlerts = s;
+      saveState();
+      showToast(`🔔 Alerta: ${e.title}`);
+      await sleep(180);
     }
   }
 };
@@ -373,7 +550,7 @@ const setActiveRoute = (route) => {
 
 const getRouteFromHash = () => {
   const h = (location.hash || "#home").replace("#", "");
-  const allowed = ["home", "peso", "meds", "vaccines", "routines", "food", "history", "settings"];
+  const allowed = ["home", "peso", "meds", "vaccines", "routines", "food", "history", "settings", "alerts"];
   return allowed.includes(h) ? h : "home";
 };
 
@@ -476,6 +653,67 @@ const renderHome = () => {
   }
 
   const nextEvt = events.find((e) => e.date) || null;
+
+/* -------------------------------
+   Central de Pendências (Painel)
+--------------------------------- */
+let _alertsFilter = "all";
+
+const renderAlerts = () => {
+  const pet = getPet();
+  const events = collectUpcoming(pet);
+  const listEl = document.getElementById("alerts-list");
+  const sumEl = document.getElementById("alerts-summary");
+  if (!listEl) return;
+
+  const late = events.filter(e => e.status.className === "late");
+  const soon = events.filter(e => e.status.className === "soon");
+  const ok = events.filter(e => e.status.className === "ok");
+
+  const filterFn = (e) => {
+    if (_alertsFilter === "all") return true;
+    return e.status.className === _alertsFilter;
+  };
+
+  const filtered = events.filter(filterFn);
+
+  if (sumEl) {
+    sumEl.innerHTML = `
+      <strong>${late.length}</strong> vencido(s) ·
+      <strong>${soon.length}</strong> vencendo ·
+      <strong>${ok.length}</strong> em dia
+      <span class="muted"> · mostrando: ${_alertsFilter === "all" ? "tudo" : _alertsFilter}</span>
+    `;
+  }
+
+  const actionLabel = (e) => {
+    if (e.kind === "routine") return "Marcar feito";
+    return "Registrar dose";
+  };
+
+  const html = filtered.map((e) => {
+    const badge = `<span class="badge ${e.status.className}">${e.status.label}</span>`;
+    const date = e.date ? formatDate(e.date) : "—";
+    const icsBtn = e.date ? `<button class="btn" data-ics-one="${e.kind}:${e.id}">📅 .ics</button>` : "";
+    return `
+      <div class="card">
+        <h2>${e.title}</h2>
+        <p class="small-text">${e.detail}</p>
+        <p>Próxima: <strong>${date}</strong></p>
+        <div class="actions-row">
+          ${badge}
+          <div class="actions-row" style="gap:8px">
+            ${icsBtn}
+            <button class="btn primary" data-do-action="${e.kind}:${e.id}">${actionLabel(e)}</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  listEl.innerHTML = html || `<p class="small-text">Nada por aqui 🎉</p>`;
+};
+
   const heroNext = document.getElementById("hero-next");
   if (heroNext) heroNext.textContent = `Próximo: ${nextEvt ? `${nextEvt.title} (${formatDate(nextEvt.date)})` : "—"}`;
 
@@ -1038,7 +1276,7 @@ const attachEvents = () => {
   });
 
   // food
-  document.getElementById("food-form")?.addEventListener("submit", (e) => {
+  document.getElementById("food-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const text = document.getElementById("food-text").value.trim();
     const notes = document.getElementById("food-notes").value.trim();
@@ -1046,7 +1284,8 @@ const attachEvents = () => {
 
     const pet = getPet();
     pet.food = pet.food || { current: null, history: [] };
-    const date = todayISO();
+    const date = await openDateDialog({ title: "Registrar dose", sub: "Escolha a data real da aplicação.", defaultISO: todayISO() });
+    if (!date) return;
 
     pet.food.current = { since: date, text, notes };
     pet.food.history = pet.food.history || [];
@@ -1173,6 +1412,64 @@ const attachEvents = () => {
   window.addEventListener("hashchange", () => {
     setActiveRoute(getRouteFromHash());
   });
+  // Central de Pendências (filtros + ações)
+  document.querySelectorAll("[data-alert-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-alert-filter]").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      _alertsFilter = btn.dataset.alertFilter || "all";
+      renderAlerts();
+    });
+  });
+
+  document.getElementById("alerts-list")?.addEventListener("click", async (e) => {
+    const a = e.target.closest("[data-do-action]");
+    if (a) {
+      const [kind, id] = (a.dataset.doAction || "").split(":");
+      if (!kind || !id) return;
+
+      const picked = await openDateDialog({
+        title: kind === "routine" ? "Marcar rotina como feita" : "Registrar dose",
+        sub: "Escolha a data real do ocorrido (pode ser hoje ou retroativo).",
+        defaultISO: todayISO()
+      });
+      if (!picked) return;
+
+      if (kind === "med") {
+        const pet = getPet();
+        const med = (pet.medications || []).find(x => x.id === id);
+        if (!med) return;
+        med.applications = med.applications || [];
+        med.applications.push({ id: generateId("app"), date: picked, note: "" });
+        pushTimeline({ date: picked, type: "med", title: `${med.name} aplicado`, detail: `Dose em ${formatDate(picked)}` });
+        saveState(); renderAll(); notify(`Dose registrada: ${med.name}`);
+      } else if (kind === "vac") {
+        const pet = getPet();
+        const vac = (pet.vaccinations || []).find(x => x.id === id);
+        if (!vac) return;
+        vac.doses = vac.doses || [];
+        vac.doses.push(picked);
+        pushTimeline({ date: picked, type: "vacina", title: `${vac.name} aplicada`, detail: `Dose em ${formatDate(picked)}` });
+        saveState(); renderAll(); notify(`Vacina registrada: ${vac.name}`);
+      } else if (kind === "routine") {
+        const pet = getPet();
+        const rt = (pet.routines || []).find(x => x.id === id);
+        if (!rt) return;
+        rt.logs = rt.logs || [];
+        rt.logs.push({ id: generateId("log"), date: picked, note: "" });
+        pushTimeline({ date: picked, type: "rotina", title: `${rt.name} feita`, detail: `Marcado em ${formatDate(picked)}` });
+        saveState(); renderAll(); notify(`Rotina feita: ${rt.name}`);
+      }
+      return;
+    }
+
+    const b = e.target.closest("[data-ics-one]");
+    if (b) {
+      const [kind, id] = (b.dataset.icsOne || "").split(":");
+      exportICSSingle(kind, id);
+    }
+  });
+
 };
 
 /* -------------------------------
