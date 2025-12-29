@@ -6,8 +6,8 @@
   <title>ScoobyCare</title>
   <meta name="theme-color" content="#6D5EFc" />
   <link rel="manifest" href="manifest.json" />
-  <link rel="icon" href="icons/icon-192.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="icons/icon-192.svg" />
+  <link rel="icon" href="icons/icon-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -210,6 +210,22 @@
           <div id="timeline" class="list"></div>
         </div>
       </section>
+      <section data-view="alerts" class="view hidden">
+        <h1>Central de Pendências</h1>
+
+        <div class="card">
+          <div class="filters-row">
+            <button class="chip active" data-alert-filter="all">Tudo</button>
+            <button class="chip" data-alert-filter="late">Vencidos</button>
+            <button class="chip" data-alert-filter="soon">Vencendo</button>
+            <button class="chip" data-alert-filter="ok">Em dia</button>
+          </div>
+          <div id="alerts-summary" class="small-text" style="margin-top:10px"></div>
+        </div>
+
+        <div id="alerts-list" class="card-grid"></div>
+      </section>
+
 
       <section data-view="settings" class="view hidden">
         <h1>Ajustes</h1>
@@ -246,6 +262,15 @@
           <h2>Sobre</h2>
           <p class="small-text">Funciona offline após o primeiro acesso. Dados salvos localmente no seu navegador.</p>
         </div>
+      
+        <div class="card">
+          <h2>Modo Veterinário</h2>
+          <p class="small-text">Gera um relatório resumido do Scooby (peso, vacinas, remédios, rotinas e histórico) pronto pra salvar em PDF.</p>
+          <div class="actions-row">
+            <button id="btn-vet-pdf" class="btn primary">Gerar relatório (PDF)</button>
+          </div>
+        </div>
+
       </section>
     </main>
   </div>
@@ -255,20 +280,39 @@
   <script src="app.js" type="module"></script>
 
     <!-- Modal de data (para registrar dose/ação em um dia específico) -->
+    
     <dialog id="date-dialog" class="date-dialog">
       <form method="dialog" class="date-dialog-card">
         <h3 id="date-dialog-title">Selecionar data</h3>
         <p class="small-text" id="date-dialog-sub">Escolha a data do registro.</p>
-        <div class="field" style="margin-top:10px">
-          <label for="date-dialog-input">Data</label>
-          <input id="date-dialog-input" type="date" required />
+
+        <div class="date-picker" aria-label="Calendário">
+          <div class="date-picker__top">
+            <button class="icon-btn" id="dp-prev" value="noop" aria-label="Mês anterior">‹</button>
+            <div class="date-picker__month" id="dp-month">—</div>
+            <button class="icon-btn" id="dp-next" value="noop" aria-label="Próximo mês">›</button>
+          </div>
+
+          <div class="date-picker__dow">
+            <span>Dom</span><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span>
+          </div>
+
+          <div class="date-picker__grid" id="dp-grid"></div>
+
+          <div class="field" style="margin-top:10px">
+            <label for="date-dialog-input">Data selecionada</label>
+            <input id="date-dialog-input" type="text" inputmode="numeric" placeholder="AAAA-MM-DD" required />
+          </div>
+          <p class="small-text muted" id="dp-hint" style="margin-top:6px">Dica: clique num dia do calendário ou digite a data.</p>
         </div>
+
         <div class="actions-row" style="justify-content:flex-end; margin-top:14px">
           <button class="btn" value="cancel">Cancelar</button>
           <button class="btn primary" id="date-dialog-ok" value="ok">Salvar</button>
         </div>
       </form>
     </dialog>
+
 
 </body>
 </html>
