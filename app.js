@@ -453,6 +453,169 @@ const computeStatus = (dueDate) => {
 /* -------------------------------
    Estado / Storage
 --------------------------------- */
+
+
+/* ------------------------------
+   Modo Veterinário — Relatório (PDF via impressão)
+   - Sem dependências: abre uma página de relatório e dispara window.print()
+   - O usuário salva como PDF (Chrome/Edge/Android/ iOS)
+--------------------------------- */
+const buildVetReportHTML = () => {
+  const state = AppState;
+  const pet = getPet();
+  const profile = pet.profile || {};
+  const weights = (pet.weightRecords || []).slice().sort((a,b)=> (a.date<b.date?1:-1));
+  const lastWeight = weights[0];
+  const vaccines = (pet.vaccinations || []);
+  const meds = (pet.medications || []);
+  const routines = (pet.routines || []);
+  const timeline = (pet.timeline || []).slice().sort((a,b)=> (a.date<b.date?1:-1));
+
+  const line = (label, value) => `<div class="row"><div class="k">${label}</div><div class="v">${value ?? "—"}</div></div>`;
+  const badge = (status) => status ? `<span class="badge ${status.className}">${status.label}</span>` : "";
+
+  const vaccineRows = vaccines.length ? vaccines.map(v=>{
+    const last = (v.doses || []).slice().sort().at(-1);
+    const next = last ? nextDateFrom(last, v.intervalDays) : null;
+    const st = computeStatus(next);
+    return `<div class="item">
+      <div class="item-h"><strong>${v.name}</strong> ${badge(st)}</div>
+      <div class="item-b">Última: ${formatDate(last)} | Próxima: ${formatDate(next)} | Intervalo: ${v.intervalDays} dias</div>
+    </div>`;
+  }).join("") : `<div class="muted">Nenhuma vacina cadastrada.</div>`;
+
+  const medsRows = meds.length ? meds.map(m=>{
+    const last = (m.applications || []).map(a=>a.date).slice().sort().at(-1);
+    const next = last ? nextDateFrom(last, m.intervalDays) : null;
+    const st = computeStatus(next);
+    return `<div class="item">
+      <div class="item-h"><strong>${m.name}</strong> (${m.doseLabel || "—"}) ${badge(st)}</div>
+      <div class="item-b">Última: ${formatDate(last)} | Próxima: ${formatDate(next)} | Intervalo: ${m.intervalDays} dias</div>
+    </div>`;
+  }).join("") : `<div class="muted">Nenhum medicamento cadastrado.</div>`;
+
+  const routineRows = routines.length ? routines.map(r=>{
+    const last = (r.logs || []).map(x=>x.date).slice().sort().at(-1);
+    const next = last ? nextDateMonthsFrom(last, r.everyMonths || 1) : todayISO();
+    const st = computeStatus(next);
+    return `<div class="item">
+      <div class="item-h"><strong>${r.name}</strong> ${badge(st)}</div>
+      <div class="item-b">Última: ${formatDate(last)} | Próxima: ${formatDate(next)} | A cada ${r.everyMonths || 1} mês(es)</div>
+    </div>`;
+  }).join("") : `<div class="muted">Nenhuma rotina cadastrada.</div>`;
+
+  const food = pet.food?.current?.text || "—";
+  const foodSince = pet.food?.current?.since || null;
+
+  const tlRows = timeline.slice(0, 20).map(t=>{
+    const d = formatDate(t.date);
+    const title = t.title || t.type || "Evento";
+    const detail = t.detail || "";
+    return `<li><strong>${d}</strong> — ${title}${detail ? `: ${detail}` : ""}</li>`;
+  }).join("") || "<li class='muted'>Sem registros.</li>";
+
+  const now = new Date();
+  const printedAt = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${now.getFullYear()} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Relatório Veterinário — ${profile.name || "Pet"}</title>
+<style>
+  :root{
+    --bg:#0b1020; --card:#121a33; --text:#e9edff; --muted:#a9b3d9;
+    --ok:#1bd96a; --soon:#ffbf3c; --late:#ff4d6d; --line:rgba(255,255,255,.12);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu; background:#fff; color:#111;}
+  .page{padding:22px; max-width:900px; margin:0 auto;}
+  h1{margin:0 0 4px 0; font-size:22px}
+  .sub{color:#444; margin:0 0 14px 0; font-size:13px}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  .card{border:1px solid #ddd; border-radius:14px; padding:14px}
+  .row{display:flex; justify-content:space-between; gap:12px; padding:6px 0; border-bottom:1px solid #eee}
+  .row:last-child{border-bottom:none}
+  .k{color:#444; font-size:12px}
+  .v{font-weight:600; font-size:12px}
+  .section-title{margin:16px 0 8px; font-size:14px}
+  .item{border:1px solid #eee; border-radius:12px; padding:10px; margin:8px 0}
+  .item-h{display:flex; gap:10px; align-items:center; justify-content:space-between}
+  .item-b{color:#444; font-size:12px; margin-top:6px}
+  .badge{padding:4px 8px; border-radius:999px; font-size:11px; border:1px solid #ddd; white-space:nowrap}
+  .badge.ok{background:#eafff1; border-color:#b8f2cb}
+  .badge.soon{background:#fff6df; border-color:#ffe0a3}
+  .badge.late{background:#ffe8ee; border-color:#ffb3c2}
+  .badge.muted{background:#f4f4f4}
+  ul{margin:8px 0 0 18px; padding:0}
+  li{margin:6px 0; font-size:12px}
+  .muted{color:#777; font-size:12px}
+  .print-note{margin-top:14px; color:#666; font-size:11px}
+  @media print{
+    body{background:#fff}
+    .page{padding:0}
+    .card,.item{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <h1>Relatório Veterinário — ${profile.name || "Pet"}</h1>
+    <p class="sub">Gerado em ${printedAt} • ScoobyCare</p>
+
+    <div class="grid">
+      <div class="card">
+        <div class="section-title">Identificação</div>
+        ${line("Raça", profile.breed)}
+        ${line("Nascimento", formatDate(profile.birthDate))}
+        ${line("Castração", formatDate(profile.neuteredDate))}
+        ${line("Observações", profile.notes || "—")}
+      </div>
+      <div class="card">
+        <div class="section-title">Resumo rápido</div>
+        ${line("Último peso", lastWeight ? `${lastWeight.kg.toFixed(2)} kg (${formatDate(lastWeight.date)})` : "—")}
+        ${line("Alimentação atual", food)}
+        ${line("Desde", formatDate(foodSince))}
+      </div>
+    </div>
+
+    <div class="section-title">Vacinas</div>
+    <div class="card">${vaccineRows}</div>
+
+    <div class="section-title">Medicamentos / Parasitas</div>
+    <div class="card">${medsRows}</div>
+
+    <div class="section-title">Rotinas</div>
+    <div class="card">${routineRows}</div>
+
+    <div class="section-title">Histórico recente</div>
+    <div class="card">
+      <ul>${tlRows}</ul>
+    </div>
+
+    <p class="print-note">Dica: no diálogo de impressão, escolha “Salvar como PDF”.</p>
+  </div>
+<script>
+  // aguarda render e abre impressão
+  window.addEventListener('load', () => setTimeout(()=>window.print(), 250));
+</script>
+</body>
+</html>`;
+};
+
+const openVetReportAndPrint = () => {
+  const html = buildVetReportHTML();
+  const w = window.open("", "_blank");
+  if (!w) {
+    alert("Seu navegador bloqueou o pop-up. Permita pop-ups para gerar o PDF.");
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+};
+
 const seedState = () => ({
   schemaVersion: 1,
   pets: [
@@ -795,7 +958,7 @@ const renderMeds = () => {
             <button class="btn" data-med-del="${m.id}">Excluir</button>
           </div>
         </div>
-        <p class="small-text" style="margin-top:10px">Última: ${formatDate(lastDate)} • Próxima: ${formatDate(next)}</p>
+        <p class="small-text" style="margin-top:10px">Última: ${formatDate(last)} • Próxima: ${formatDate(next)}</p>
       </div>
     `;
   }).join("") : `<div class="small-text">Nenhum medicamento cadastrado.</div>`;
@@ -824,7 +987,7 @@ const renderVaccines = () => {
             <button class="btn" data-vac-del="${v.id}">Excluir</button>
           </div>
         </div>
-        <p class="small-text" style="margin-top:10px">Última: ${formatDate(lastDate)} • Próxima: ${formatDate(next)}</p>
+        <p class="small-text" style="margin-top:10px">Última: ${formatDate(last)} • Próxima: ${formatDate(next)}</p>
       </div>
     `;
   }).join("") : `<div class="small-text">Nenhuma vacina cadastrada.</div>`;
@@ -941,15 +1104,6 @@ const attachEvents = () => {
 
     saveState();
     renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
     showToast("Peso salvo");
     e.target.reset();
     document.getElementById("weight-date").value = todayISO();
@@ -964,15 +1118,6 @@ const attachEvents = () => {
       pet.weightRecords = (pet.weightRecords || []).filter(w => w.id !== id);
       saveState();
       renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
       showToast("Registro removido");
       return;
     }
@@ -996,15 +1141,6 @@ const attachEvents = () => {
 
       saveState();
       renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
       showToast("Peso atualizado");
     }
   });
@@ -1024,15 +1160,6 @@ const attachEvents = () => {
 
     saveState();
     renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
     showToast("Medicamento adicionado");
     e.target.reset();
   });
@@ -1066,15 +1193,6 @@ const attachEvents = () => {
 
       saveState();
       renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
       showToast("Aplicação registrada");
       notify(`${m.name} registrado. Próxima em ${formatDate(nextDateFrom(date, m.intervalDays))}`);
       return;
@@ -1086,15 +1204,6 @@ const attachEvents = () => {
       pet.medications = (pet.medications || []).filter(x => x.id !== id);
       saveState();
       renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
       showToast("Removido");
     }
   });
@@ -1112,15 +1221,6 @@ const attachEvents = () => {
 
     saveState();
     renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
     showToast("Vacina adicionada");
     e.target.reset();
   });
@@ -1154,15 +1254,6 @@ const attachEvents = () => {
 
       saveState();
       renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
       showToast("Dose registrada");
       notify(`Vacina registrada: ${v.name}. Próxima em ${formatDate(nextDateFrom(date, v.intervalDays))}`);
       return;
@@ -1174,15 +1265,6 @@ const attachEvents = () => {
       pet.vaccinations = (pet.vaccinations || []).filter(x => x.id !== id);
       saveState();
       renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
       showToast("Removido");
     }
   });
@@ -1200,15 +1282,6 @@ const attachEvents = () => {
 
     saveState();
     renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
     showToast("Rotina adicionada");
     e.target.reset();
   });
@@ -1242,15 +1315,6 @@ const attachEvents = () => {
 
       saveState();
       renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
       showToast("Rotina registrada");
       notify(`Rotina registrada: ${r.name}. Próxima em ${formatDate(nextDateMonthsFrom(date, r.everyMonths))}`);
       return;
@@ -1262,15 +1326,6 @@ const attachEvents = () => {
       pet.routines = (pet.routines || []).filter(x => x.id !== id);
       saveState();
       renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
       showToast("Removido");
     }
   });
@@ -1284,7 +1339,7 @@ const attachEvents = () => {
 
     const pet = getPet();
     pet.food = pet.food || { current: null, history: [] };
-    const date = await openDateDialog({ title: "Registrar dose", sub: "Escolha a data real da aplicação.", defaultISO: todayISO() });
+    const date = await openDateDialog({ title: "Registrar alimentação", sub: "Escolha a data desta alteração na alimentação.", defaultISO: todayISO() });
     if (!date) return;
 
     pet.food.current = { since: date, text, notes };
@@ -1295,15 +1350,6 @@ const attachEvents = () => {
 
     saveState();
     renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
     showToast("Alimentação salva");
   });
 
@@ -1318,6 +1364,11 @@ const attachEvents = () => {
   document.getElementById("btn-ics-all")?.addEventListener("click", () => {
     exportICSAll();
   });
+
+  document.getElementById("btn-vet-pdf")?.addEventListener("click", () => {
+    openVetReportAndPrint();
+  });
+
 
   const soundToggle = document.getElementById("toggle-sound");
   if (soundToggle) {
@@ -1373,15 +1424,6 @@ const attachEvents = () => {
       AppState = parsed;
       saveState();
       renderAll();
-
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
-  window.clearInterval(boot._alertTick);
-  boot._alertTick = window.setInterval(() => {
-    try {
-      const evts = collectUpcoming(getPet());
-      maybePlaySoundAlerts(evts);
-    } catch {}
-  }, 60000);
       showToast("Importado com sucesso");
     } catch {
       showToast("Falha ao importar");
