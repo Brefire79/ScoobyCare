@@ -5,7 +5,49 @@
       <stop offset="100%" style="stop-color:#22d3ee;stop-opacity:1" />
     </linearGradient>
   </defs>
+  <!-- Fundo -->
   <rect width="512" height="512" rx="128" fill="url(#bgLarge)"/>
-  <text x="256" y="350" font-size="256" text-anchor="middle" fill="#fff">🐶</text>
-  <circle cx="256" cy="256" r="190" fill="none" stroke="#fff" stroke-width="8" opacity="0.2"/>
+  
+  <!-- Cabeça do beagle -->
+  <ellipse cx="256" cy="240" rx="112" ry="128" fill="#D2936A"/>
+  
+  <!-- Orelhas -->
+  <ellipse cx="173" cy="200" rx="48" ry="93" fill="#B8714D" transform="rotate(-25 173 200)"/>
+  <ellipse cx="339" cy="200" rx="48" ry="93" fill="#B8714D" transform="rotate(25 339 200)"/>
+  
+  <!-- Marcação preta no topo -->
+  <ellipse cx="256" cy="160" rx="80" ry="59" fill="#3D3028" opacity="0.8"/>
+  
+  <!-- Focinho branco -->
+  <ellipse cx="256" cy="280" rx="75" ry="67" fill="#FFF"/>
+  
+  <!-- Nariz -->
+  <ellipse cx="256" cy="288" rx="21" ry="16" fill="#2D2420"/>
+  
+  <!-- Olhos -->
+  <circle cx="218" cy="218" r="13" fill="#2D2420"/>
+  <circle cx="294" cy="218" r="13" fill="#2D2420"/>
+  <circle cx="221" cy="215" r="5" fill="#FFF" opacity="0.6"/>
+  <circle cx="297" cy="215" r="5" fill="#FFF" opacity="0.6"/>
+  
+  <!-- Boca feliz -->
+  <path d="M 256 299 Q 235 315 218 311 M 256 299 Q 277 315 294 311" stroke="#2D2420" stroke-width="5" fill="none" stroke-linecap="round"/>
+  
+  <!-- Língua -->
+  <ellipse cx="256" cy="325" rx="16" ry="21" fill="#FF9BB4"/>
+  
+  <!-- Detalhe do peito/corpo branco -->
+  <ellipse cx="256" cy="400" rx="93" ry="53" fill="#FFF" opacity="0.9"/>
+  
+  <!-- Patinhas -->
+  <circle cx="256" cy="440" r="21" fill="#D2936A"/>
+  <circle cx="235" cy="447" r="11" fill="#D2936A"/>
+  <circle cx="277" cy="447" r="11" fill="#D2936A"/>
+  
+  <!-- Corpo com marcação tricolor -->
+  <ellipse cx="256" cy="380" rx="85" ry="60" fill="#3D3028" opacity="0.6"/>
+  
+  <!-- Detalhes adicionais das patinhas -->
+  <circle cx="210" cy="455" r="18" fill="#D2936A"/>
+  <circle cx="302" cy="455" r="18" fill="#D2936A"/>
 </svg>

@@ -5,7 +5,42 @@
       <stop offset="100%" style="stop-color:#22d3ee;stop-opacity:1" />
     </linearGradient>
   </defs>
+  <!-- Fundo -->
   <rect width="192" height="192" rx="48" fill="url(#bg)"/>
-  <text x="96" y="130" font-size="96" text-anchor="middle" fill="#fff">🐶</text>
-  <circle cx="96" cy="96" r="70" fill="none" stroke="#fff" stroke-width="4" opacity="0.2"/>
+  
+  <!-- Cabeça do beagle -->
+  <ellipse cx="96" cy="90" rx="42" ry="48" fill="#D2936A"/>
+  
+  <!-- Orelhas -->
+  <ellipse cx="65" cy="75" rx="18" ry="35" fill="#B8714D" transform="rotate(-25 65 75)"/>
+  <ellipse cx="127" cy="75" rx="18" ry="35" fill="#B8714D" transform="rotate(25 127 75)"/>
+  
+  <!-- Marcação preta no topo -->
+  <ellipse cx="96" cy="60" rx="30" ry="22" fill="#3D3028" opacity="0.8"/>
+  
+  <!-- Focinho branco -->
+  <ellipse cx="96" cy="105" rx="28" ry="25" fill="#FFF"/>
+  
+  <!-- Nariz -->
+  <ellipse cx="96" cy="108" rx="8" ry="6" fill="#2D2420"/>
+  
+  <!-- Olhos -->
+  <circle cx="82" cy="82" r="5" fill="#2D2420"/>
+  <circle cx="110" cy="82" r="5" fill="#2D2420"/>
+  <circle cx="83" cy="81" r="2" fill="#FFF" opacity="0.6"/>
+  <circle cx="111" cy="81" r="2" fill="#FFF" opacity="0.6"/>
+  
+  <!-- Boca feliz -->
+  <path d="M 96 112 Q 88 118 82 116 M 96 112 Q 104 118 110 116" stroke="#2D2420" stroke-width="2" fill="none" stroke-linecap="round"/>
+  
+  <!-- Língua -->
+  <ellipse cx="96" cy="122" rx="6" ry="8" fill="#FF9BB4"/>
+  
+  <!-- Detalhe do peito/corpo branco -->
+  <ellipse cx="96" cy="150" rx="35" ry="20" fill="#FFF" opacity="0.9"/>
+  
+  <!-- Patinha -->
+  <circle cx="96" cy="165" r="8" fill="#D2936A"/>
+  <circle cx="88" cy="168" r="4" fill="#D2936A"/>
+  <circle cx="104" cy="168" r="4" fill="#D2936A"/>
 </svg>
