@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>ScoobyCare</title>
+  <meta name="theme-color" content="#6D5EFc" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon-192.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.svg" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">🐶</div>
+        <div class="brand-text">
+          <div class="topbar-title">ScoobyCare</div>
+          <div class="topbar-sub">Saúde, rotina e lembretes do Scooby</div>
+        </div>
+      </div>
+      <div class="status-row" aria-label="Status">
+        <span id="online-status" class="pill online">Online</span>
+        <span id="sync-status" class="pill muted">Salvo</span>
+      </div>
+    </header>
+
+    <nav class="tab-bar" aria-label="Navegação principal">
+      <a href="#home" class="tab-link" data-route="home">
+        <span class="tab-ico" aria-hidden="true">🏠</span><span class="tab-txt">Home</span>
+      </a>
+      <a href="#peso" class="tab-link" data-route="peso">
+        <span class="tab-ico" aria-hidden="true">⚖️</span><span class="tab-txt">Peso</span>
+      </a>
+      <a href="#meds" class="tab-link" data-route="meds">
+        <span class="tab-ico" aria-hidden="true">💊</span><span class="tab-txt">Remédios</span>
+      </a>
+      <a href="#vaccines" class="tab-link" data-route="vaccines">
+        <span class="tab-ico" aria-hidden="true">🛡️</span><span class="tab-txt">Vacinas</span>
+      </a>
+      <a href="#routines" class="tab-link" data-route="routines">
+        <span class="tab-ico" aria-hidden="true">✅</span><span class="tab-txt">Rotinas</span>
+      </a>
+      <a href="#food" class="tab-link" data-route="food">
+        <span class="tab-ico" aria-hidden="true">🥣</span><span class="tab-txt">Comida</span>
+      </a>
+      <a href="#history" class="tab-link" data-route="history">
+        <span class="tab-ico" aria-hidden="true">🕒</span><span class="tab-txt">Histórico</span>
+      </a>
+      <a href="#settings" class="tab-link" data-route="settings">
+        <span class="tab-ico" aria-hidden="true">⚙️</span><span class="tab-txt">Ajustes</span>
+      </a>
+    </nav>
+
+    <main class="main">
+      <section data-view="home" class="view">
+        <div class="hero">
+          <div class="hero-left">
+            <div class="hero-title">E aí, Scooby!</div>
+            <div id="hero-sub" class="hero-sub">Vamos manter tudo em dia 🧠⚡</div>
+            <div class="hero-chips">
+              <span id="hero-weight" class="chip">Último peso: —</span>
+              <span id="hero-next" class="chip">Próximo: —</span>
+            </div>
+          </div>
+          <div class="hero-right" aria-hidden="true">
+            <div class="hero-avatar">🐾</div>
+          </div>
+        </div>
+
+        <div id="home-alerts" class="card"></div>
+
+        <div class="grid">
+          <div class="card">
+            <h2>Próximos eventos</h2>
+            <div id="home-upcoming" class="list"></div>
+          </div>
+
+          <div class="card">
+            <h2>Perfil</h2>
+            <div id="home-profile" class="small-text"></div>
+          </div>
+        </div>
+      </section>
+
+      <section data-view="peso" class="view hidden">
+        <h1>Peso</h1>
+        <form id="weight-form" class="card form-card">
+          <div class="field">
+            <label for="weight-date">Data</label>
+            <input id="weight-date" type="date" required />
+          </div>
+          <div class="field">
+            <label for="weight-kg">Peso (kg)</label>
+            <input id="weight-kg" type="number" min="0" step="0.01" placeholder="Ex: 13.65" required />
+          </div>
+          <div class="field">
+            <label for="weight-note">Observação (opcional)</label>
+            <input id="weight-note" type="text" placeholder="Ex: pós passeio, jejum, etc." />
+          </div>
+          <button type="submit" class="btn primary">Salvar peso</button>
+        </form>
+
+        <div class="card">
+          <h2>Registros</h2>
+          <div id="weight-list" class="list"></div>
+        </div>
+      </section>
+
+      <section data-view="meds" class="view hidden">
+        <h1>Medicamentos & Parasitas</h1>
+
+        <form id="med-form" class="card form-card">
+          <div class="field">
+            <label for="med-name">Nome</label>
+            <input id="med-name" type="text" placeholder="Ex: Bravecto" required />
+          </div>
+          <div class="field">
+            <label for="med-dose">Dose / faixa</label>
+            <input id="med-dose" type="text" placeholder="Ex: 10–20 kg" />
+          </div>
+          <div class="field">
+            <label for="med-interval">Intervalo (dias)</label>
+            <input id="med-interval" type="number" min="1" value="90" required />
+          </div>
+          <button type="submit" class="btn primary">Adicionar</button>
+        </form>
+
+        <div class="card">
+          <h2>Lista</h2>
+          <div id="med-list" class="card-grid"></div>
+        </div>
+      </section>
+
+      <section data-view="vaccines" class="view hidden">
+        <h1>Vacinas</h1>
+
+        <form id="vaccine-form" class="card form-card">
+          <div class="field">
+            <label for="vaccine-name">Nome da vacina</label>
+            <input id="vaccine-name" type="text" placeholder="Ex: Antirrábica" required />
+          </div>
+          <div class="field">
+            <label for="vaccine-interval">Intervalo (dias)</label>
+            <input id="vaccine-interval" type="number" min="1" value="365" required />
+          </div>
+          <button type="submit" class="btn primary">Adicionar vacina</button>
+          <p class="hint">Dica: se for reforço anual, use 365 dias.</p>
+        </form>
+
+        <div class="card">
+          <h2>Carteira</h2>
+          <div id="vaccines-list" class="card-grid"></div>
+        </div>
+      </section>
+
+      <section data-view="routines" class="view hidden">
+        <h1>Rotinas</h1>
+
+        <form id="routine-form" class="card form-card">
+          <div class="field">
+            <label for="routine-name">Rotina</label>
+            <input id="routine-name" type="text" placeholder="Ex: Exame de fezes" required />
+          </div>
+          <div class="field">
+            <label for="routine-every">A cada (meses)</label>
+            <input id="routine-every" type="number" min="1" value="1" required />
+          </div>
+          <button type="submit" class="btn primary">Adicionar rotina</button>
+          <p class="hint">Exame de fezes: 1 | Vermífugo: 6</p>
+        </form>
+
+        <div class="card">
+          <h2>Lista</h2>
+          <div id="routine-list" class="card-grid"></div>
+        </div>
+      </section>
+
+      <section data-view="food" class="view hidden">
+        <h1>Alimentação</h1>
+
+        <form id="food-form" class="card form-card">
+          <div class="field">
+            <label for="food-text">Rotina atual</label>
+            <textarea id="food-text" rows="3" required></textarea>
+          </div>
+          <div class="field">
+            <label for="food-notes">Observações (opcional)</label>
+            <textarea id="food-notes" rows="2"></textarea>
+          </div>
+          <button type="submit" class="btn primary">Salvar alimentação</button>
+        </form>
+
+        <div class="card">
+          <h2>Atual</h2>
+          <div id="food-current" class="small-text"></div>
+        </div>
+
+        <div class="card">
+          <h2>Histórico</h2>
+          <div id="food-history" class="list"></div>
+        </div>
+      </section>
+
+      <section data-view="history" class="view hidden">
+        <h1>Histórico</h1>
+        <div class="card">
+          <h2>Linha do tempo</h2>
+          <div id="timeline" class="list"></div>
+        </div>
+      </section>
+
+      <section data-view="settings" class="view hidden">
+        <h1>Ajustes</h1>
+
+        <div class="card">
+          <h2>Backup</h2>
+          <div class="actions-row">
+            <button id="btn-export" class="btn">Exportar JSON</button>
+            <label class="btn secondary">
+              Importar JSON
+              <input id="import-file" type="file" accept="application/json" hidden />
+            </label>
+          </div>
+          <p class="small-text">Exporta e importa tudo (peso, remédios, vacinas, rotinas, alimentação e histórico).</p>
+        </div>
+
+        <div class="card">
+          <h2>Notificações</h2>
+          <div class="actions-row" style="flex-wrap:wrap">
+            <label class="pill" style="gap:8px; display:flex; align-items:center;">
+              <input id="toggle-sound" type="checkbox" />
+              Alertas sonoros
+            </label>
+            <button id="btn-sound-test" class="btn secondary">Testar som</button>
+            <button id="btn-ics-all" class="btn">Exportar calendário (.ics)</button>
+          </div>
+          <div class="actions-row">
+            <button id="btn-notify" class="btn">Testar notificação</button>
+          </div>
+          <p class="small-text">Lembrete automático no navegador depende do suporte do sistema. O app sempre mostra alertas na Home.</p>
+        </div>
+
+        <div class="card">
+          <h2>Sobre</h2>
+          <p class="small-text">Funciona offline após o primeiro acesso. Dados salvos localmente no seu navegador.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js" type="module"></script>
+
+    <!-- Modal de data (para registrar dose/ação em um dia específico) -->
+    <dialog id="date-dialog" class="date-dialog">
+      <form method="dialog" class="date-dialog-card">
+        <h3 id="date-dialog-title">Selecionar data</h3>
+        <p class="small-text" id="date-dialog-sub">Escolha a data do registro.</p>
+        <div class="field" style="margin-top:10px">
+          <label for="date-dialog-input">Data</label>
+          <input id="date-dialog-input" type="date" required />
+        </div>
+        <div class="actions-row" style="justify-content:flex-end; margin-top:14px">
+          <button class="btn" value="cancel">Cancelar</button>
+          <button class="btn primary" id="date-dialog-ok" value="ok">Salvar</button>
+        </div>
+      </form>
+    </dialog>
+
+</body>
+</html>
