@@ -1,0 +1,23 @@
+{
+  "name": "scoobycare-push-server",
+  "version": "1.0.0",
+  "description": "Backend para Web Push Notifications do ScoobyCare",
+  "main": "push-server.js",
+  "scripts": {
+    "start": "node push-server.js",
+    "dev": "nodemon push-server.js",
+    "generate-keys": "node -e \"const webpush = require('web-push'); const keys = webpush.generateVAPIDKeys(); console.log('Public:', keys.publicKey); console.log('Private:', keys.privateKey);\""
+  },
+  "keywords": ["push", "notifications", "vapid"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "web-push": "^3.6.6",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>ScoobyCare</title>
   <meta name="theme-color" content="#6D5EFc" />
   <link rel="manifest" href="manifest.json" />
@@ -11,49 +14,68 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="logo" aria-hidden="true">🐶</div>
-        <div class="brand-text">
-          <div class="topbar-title">ScoobyCare</div>
-          <div class="topbar-sub">Saúde, rotina e lembretes do Scooby</div>
+  <header class="app-header">
+    <button id="menu-toggle" class="menu-toggle" aria-label="Abrir menu" aria-expanded="false">
+      <span class="hamburger-line"></span>
+      <span class="hamburger-line"></span>
+      <span class="hamburger-line"></span>
+    </button>
+    <h1 id="screen-title" class="screen-title">Dashboard</h1>
+    <div class="header-actions">
+      <span id="online-status" class="status-badge online">Online</span>
+      <span id="sync-status" class="status-badge muted">Salvo</span>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-logo">🐶</div>
+        <div class="sidebar-brand-text">
+          <div class="sidebar-brand-name">ScoobyCare</div>
+          <div class="sidebar-brand-sub">Saúde do Scooby</div>
         </div>
       </div>
-      <div class="status-row" aria-label="Status">
-        <span id="online-status" class="pill online">Online</span>
-        <span id="sync-status" class="pill muted">Salvo</span>
-      </div>
-    </header>
+      
+      <nav class="sidebar-nav">
+        <a href="#home" class="sidebar-link active" data-route="home">
+          <span class="sidebar-icon">🏠</span>
+          <span class="sidebar-label">Dashboard</span>
+        </a>
+        <a href="#peso" class="sidebar-link" data-route="peso">
+          <span class="sidebar-icon">⚖️</span>
+          <span class="sidebar-label">Peso</span>
+        </a>
+        <a href="#meds" class="sidebar-link" data-route="meds">
+          <span class="sidebar-icon">💊</span>
+          <span class="sidebar-label">Remédios</span>
+        </a>
+        <a href="#vaccines" class="sidebar-link" data-route="vaccines">
+          <span class="sidebar-icon">🛡️</span>
+          <span class="sidebar-label">Vacinas</span>
+        </a>
+        <a href="#routines" class="sidebar-link" data-route="routines">
+          <span class="sidebar-icon">✅</span>
+          <span class="sidebar-label">Rotinas</span>
+        </a>
+        <a href="#food" class="sidebar-link" data-route="food">
+          <span class="sidebar-icon">🥣</span>
+          <span class="sidebar-label">Comida</span>
+        </a>
+        <a href="#history" class="sidebar-link" data-route="history">
+          <span class="sidebar-icon">🕒</span>
+          <span class="sidebar-label">Histórico</span>
+        </a>
+        <a href="#settings" class="sidebar-link" data-route="settings">
+          <span class="sidebar-icon">⚙️</span>
+          <span class="sidebar-label">Ajustes</span>
+        </a>
+      </nav>
+    </aside>
 
-    <nav class="tab-bar" aria-label="Navegação principal">
-      <a href="#home" class="tab-link" data-route="home">
-        <span class="tab-ico" aria-hidden="true">🏠</span><span class="tab-txt">Home</span>
-      </a>
-      <a href="#peso" class="tab-link" data-route="peso">
-        <span class="tab-ico" aria-hidden="true">⚖️</span><span class="tab-txt">Peso</span>
-      </a>
-      <a href="#meds" class="tab-link" data-route="meds">
-        <span class="tab-ico" aria-hidden="true">💊</span><span class="tab-txt">Remédios</span>
-      </a>
-      <a href="#vaccines" class="tab-link" data-route="vaccines">
-        <span class="tab-ico" aria-hidden="true">🛡️</span><span class="tab-txt">Vacinas</span>
-      </a>
-      <a href="#routines" class="tab-link" data-route="routines">
-        <span class="tab-ico" aria-hidden="true">✅</span><span class="tab-txt">Rotinas</span>
-      </a>
-      <a href="#food" class="tab-link" data-route="food">
-        <span class="tab-ico" aria-hidden="true">🥣</span><span class="tab-txt">Comida</span>
-      </a>
-      <a href="#history" class="tab-link" data-route="history">
-        <span class="tab-ico" aria-hidden="true">🕒</span><span class="tab-txt">Histórico</span>
-      </a>
-      <a href="#settings" class="tab-link" data-route="settings">
-        <span class="tab-ico" aria-hidden="true">⚙️</span><span class="tab-txt">Ajustes</span>
-      </a>
-    </nav>
+    <div id="overlay" class="overlay hidden"></div>
 
-    <main class="main">
+    <main class="content">
       <section data-view="home" class="view">
         <div class="hero">
           <div class="hero-left">
@@ -231,7 +253,48 @@
         <h1>Ajustes</h1>
 
         <div class="card">
-          <h2>Backup</h2>
+          <h2>🔔 Notificações e Alertas</h2>
+          
+          <div class="field">
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input id="toggle-bark-sounds" type="checkbox" />
+              <span>🐶 Sons de latido no app (quando aberto)</span>
+            </label>
+            <p class="hint">Toca "au-au" quando há pendências ao abrir o app ou registrar ações</p>
+          </div>
+
+          <div class="field">
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input id="toggle-push-notifications" type="checkbox" />
+              <span>📧 Push Notifications (quando app fechado)</span>
+            </label>
+            <p class="hint" id="push-status-text">Status: Desativado</p>
+          </div>
+
+          <div class="field" id="push-inbox-field" hidden>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <div class="small-text" style="font-weight:600;">Notificações recebidas</div>
+              <button id="btn-mark-push-read" class="btn secondary">Marcar como lidas</button>
+            </div>
+            <div id="push-inbox-list" class="list" style="margin-top:8px"></div>
+            <p class="hint">Ao abrir o app, as notificações são marcadas como lidas e o número do atalho é limpo.</p>
+          </div>
+
+          <div class="field">
+            <label for="alert-days-ahead">Alertar com antecedência de (dias):</label>
+            <input id="alert-days-ahead" type="number" min="1" max="30" value="7" />
+            <p class="hint">Avisar quando algo vencer em até X dias</p>
+          </div>
+
+          <div class="actions-row" style="flex-wrap:wrap; gap:8px;">
+            <button id="btn-test-bark" class="btn secondary">🔊 Testar latido</button>
+            <button id="btn-test-push" class="btn secondary">📧 Enviar push de teste</button>
+            <button id="btn-ics-all" class="btn">📅 Exportar calendário (.ics)</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>💾 Backup</h2>
           <div class="actions-row">
             <button id="btn-export" class="btn">Exportar JSON</button>
             <label class="btn secondary">
@@ -243,28 +306,39 @@
         </div>
 
         <div class="card">
-          <h2>Notificações</h2>
-          <div class="actions-row" style="flex-wrap:wrap">
-            <label class="pill" style="gap:8px; display:flex; align-items:center;">
-              <input id="toggle-sound" type="checkbox" />
-              Alertas sonoros
-            </label>
-            <button id="btn-sound-test" class="btn secondary">Testar som</button>
-            <button id="btn-ics-all" class="btn">Exportar calendário (.ics)</button>
-          </div>
-          <div class="actions-row">
-            <button id="btn-notify" class="btn">Testar notificação</button>
-          </div>
-          <p class="small-text">Lembrete automático no navegador depende do suporte do sistema. O app sempre mostra alertas na Home.</p>
+          <h2>📖 Como usar notificações</h2>
+          <details>
+            <summary style="cursor:pointer; font-weight:600; margin-bottom:8px;">📱 Importar eventos no Google Agenda (Mobile)</summary>
+            <ol class="small-text">
+              <li>Clique em "Exportar calendário (.ics)" acima</li>
+              <li>Baixe o arquivo .ics</li>
+              <li>Abra o Google Agenda no celular</li>
+              <li>Toque em ⋮ (menu) > Configurações > Importar eventos</li>
+              <li>Selecione o arquivo baixado</li>
+            </ol>
+          </details>
+          
+          <details style="margin-top:12px;">
+            <summary style="cursor:pointer; font-weight:600; margin-bottom:8px;">💻 Importar eventos no Google Agenda (Desktop)</summary>
+            <ol class="small-text">
+              <li>Clique em "Exportar calendário (.ics)" acima</li>
+              <li>Acesse <a href="https://calendar.google.com" target="_blank">Google Agenda</a></li>
+              <li>No menu lateral, clique na engrenagem ⚙️ > Configurações</li>
+              <li>Clique em "Importar e exportar" na barra lateral</li>
+              <li>Clique em "Selecionar arquivo do computador"</li>
+              <li>Escolha o arquivo .ics baixado e clique em "Importar"</li>
+            </ol>
+          </details>
         </div>
 
         <div class="card">
-          <h2>Sobre</h2>
+          <h2>ℹ️ Sobre</h2>
           <p class="small-text">Funciona offline após o primeiro acesso. Dados salvos localmente no seu navegador.</p>
+          <p class="small-text"><strong>Limitações:</strong> Push notifications não suportam som customizado (usam som padrão do sistema). Sons de latido funcionam apenas quando o app está aberto.</p>
         </div>
       
         <div class="card">
-          <h2>Modo Veterinário</h2>
+          <h2>🩺 Modo Veterinário</h2>
           <p class="small-text">Gera um relatório resumido do Scooby (peso, vacinas, remédios, rotinas e histórico) pronto pra salvar em PDF.</p>
           <div class="actions-row">
             <button id="btn-vet-pdf" class="btn primary">Gerar relatório (PDF)</button>

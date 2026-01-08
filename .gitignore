@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Env / secrets
+.env
+server/.env
+
+# Local subscriptions storage (contains device endpoints/keys)
+server/subscriptions.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/

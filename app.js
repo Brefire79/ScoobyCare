@@ -7,8 +7,666 @@
 
 const STORAGE_KEY = "scoobycare_state_v1";
 const ALERT_SOON_DAYS = 7;
+const PUSH_SERVER_URL = "http://localhost:3001";
 
 let AppState = null;
+
+/* ===============================
+   MÓDULO DE ÁUDIO - SONS DE LATIDO
+================================ */
+const BarkSounds = {
+  audioContext: null,
+  sounds: {},
+  failedAt: {},
+  enabled: false,
+  unlocked: false,
+
+  init() {
+    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  },
+
+  async unlock() {
+    if (this.unlocked) return true;
+    
+    try {
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+      
+      // Criar som silencioso para desbloquear
+      const osc = this.audioContext.createOscillator();
+      const gain = this.audioContext.createGain();
+      gain.gain.value = 0;
+      osc.connect(gain);
+      gain.connect(this.audioContext.destination);
+      osc.start();
+      osc.stop(this.audioContext.currentTime + 0.01);
+      
+      this.unlocked = true;
+      return true;
+    } catch (e) {
+      console.warn('Não foi possível desbloquear áudio:', e);
+      return false;
+    }
+  },
+
+  async loadSound(type) {
+    if (this.sounds[type]) return this.sounds[type];
+
+    // Se falhou recentemente, evita repetir tentativa imediatamente
+    const lastFail = this.failedAt[type];
+    if (lastFail && (Date.now() - lastFail) < 3000) return null;
+
+    const soundMap = {
+      'vaccine': './assets/bark-agudo.mp3',
+      'med': './assets/bark-grave.mp3',
+      'routine': './assets/bark-curto.mp3'
+    };
+
+    const url = soundMap[type] || soundMap.med;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ao carregar ${url}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+      this.sounds[type] = audioBuffer;
+      delete this.failedAt[type];
+      return audioBuffer;
+    } catch (e) {
+      console.warn(`Não foi possível carregar som ${type}:`, e);
+      this.failedAt[type] = Date.now();
+      return null;
+    }
+  },
+
+  playSynth(type = 'med') {
+    if (!this.enabled || !this.unlocked) return false;
+
+    try {
+      const ctx = this.audioContext;
+      const now = ctx.currentTime;
+
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      // “Latido” simples: dois oscillators + envelope curto
+      const base = type === 'vaccine' ? 520 : type === 'routine' ? 420 : 320;
+      osc1.type = 'square';
+      osc2.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(base, now);
+      osc2.frequency.setValueAtTime(base * 1.8, now);
+      osc1.frequency.exponentialRampToValueAtTime(base * 0.7, now + 0.08);
+      osc2.frequency.exponentialRampToValueAtTime(base * 1.2, now + 0.08);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.65, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc1.start(now);
+      osc2.start(now);
+      osc1.stop(now + 0.13);
+      osc2.stop(now + 0.13);
+
+      return true;
+    } catch (e) {
+      console.warn('Erro ao tocar som sintetizado:', e);
+      return false;
+    }
+  },
+
+  async play(type = 'med') {
+    if (!this.enabled || !this.unlocked) return false;
+
+    try {
+      const buffer = await this.loadSound(type);
+      // Se o arquivo for inválido (placeholder) ou falhar, usar fallback sintetizado
+      if (!buffer) return this.playSynth(type);
+
+      const source = this.audioContext.createBufferSource();
+      const gainNode = this.audioContext.createGain();
+      
+      source.buffer = buffer;
+      source.connect(gainNode);
+      gainNode.connect(this.audioContext.destination);
+      
+      gainNode.gain.value = 0.7;
+      source.start(0);
+      
+      return true;
+    } catch (e) {
+      console.warn('Erro ao tocar som:', e);
+      return this.playSynth(type);
+    }
+  },
+
+  canBarkForItem(itemId) {
+    const settings = AppState.settings?.barkSounds || {};
+    const today = todayISO();
+    const lastBarkDate = settings.lastBarkByItem?.[itemId];
+    
+    return lastBarkDate !== today;
+  },
+
+  markBarked(itemId) {
+    if (!AppState.settings) AppState.settings = {};
+    if (!AppState.settings.barkSounds) AppState.settings.barkSounds = {};
+    if (!AppState.settings.barkSounds.lastBarkByItem) {
+      AppState.settings.barkSounds.lastBarkByItem = {};
+    }
+    
+    AppState.settings.barkSounds.lastBarkByItem[itemId] = todayISO();
+    saveState();
+  },
+
+  async playForEvents(events) {
+    if (!this.enabled || !this.unlocked) return;
+
+    const alertDays = AppState.settings?.alertDaysAhead || 7;
+    const urgent = events.filter(e => {
+      if (!e.date) return false;
+      const diff = daysBetween(todayISO(), e.date);
+      return diff < 0 || (diff >= 0 && diff <= alertDays);
+    });
+
+    let played = 0;
+    for (const event of urgent.slice(0, 3)) {
+      if (this.canBarkForItem(event.id)) {
+        const soundType = event.kind === 'vac' ? 'vaccine' : 
+                         event.kind === 'routine' ? 'routine' : 'med';
+        
+        const success = await this.play(soundType);
+        if (success) {
+          this.markBarked(event.id);
+          played++;
+          await new Promise(r => setTimeout(r, 800));
+        }
+      }
+    }
+
+    return played > 0;
+  }
+};
+
+/* ===============================
+   WEB PUSH NOTIFICATIONS
+================================ */
+const PushNotifications = {
+  vapidPublicKey: null,
+  subscription: null,
+  supported: false,
+  serverReachable: null,
+  lastServerCheckAt: 0,
+  lastServerError: null,
+
+  init() {
+    this.supported = 'serviceWorker' in navigator && 
+                    'PushManager' in window && 
+                    'Notification' in window;
+    return this.supported;
+  },
+
+  async checkServer({ force = false, timeoutMs = 1500 } = {}) {
+    if (!force && this.serverReachable !== null && (Date.now() - this.lastServerCheckAt) < 15000) {
+      return this.serverReachable;
+    }
+
+    this.lastServerCheckAt = Date.now();
+    this.lastServerError = null;
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+      const response = await fetch(`${PUSH_SERVER_URL}/vapid-public-key`, {
+        cache: "no-store",
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const key = data?.publicKey;
+      this.assertValidVapidPublicKey(key);
+
+      this.serverReachable = true;
+      return true;
+    } catch (e) {
+      this.serverReachable = false;
+      this.lastServerError = e;
+      return false;
+    }
+  },
+
+  async getVapidPublicKey() {
+    if (this.vapidPublicKey) return this.vapidPublicKey;
+
+    try {
+      const response = await fetch(`${PUSH_SERVER_URL}/vapid-public-key`, { cache: "no-store" });
+      const data = await response.json();
+      const key = data?.publicKey;
+
+      // valida e só então cacheia
+      this.assertValidVapidPublicKey(key);
+      this.vapidPublicKey = key;
+      return key;
+    } catch (e) {
+      this.serverReachable = false;
+      this.lastServerError = e;
+      console.error('Erro ao buscar VAPID key:', e);
+      return null;
+    }
+  },
+
+  urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+      .replace(/\-/g, '+')
+      .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  },
+
+  assertValidVapidPublicKey(publicKey) {
+    if (typeof publicKey !== "string") throw new Error("VAPID public key inválida (tipo)");
+    // VAPID public key (base64url) normalmente ~87 chars
+    if (publicKey.length < 80) throw new Error("VAPID public key inválida (tamanho)");
+    if (!/^[A-Za-z0-9_-]+$/.test(publicKey)) throw new Error("VAPID public key inválida (formato)");
+
+    const bytes = this.urlBase64ToUint8Array(publicKey);
+    // A chave pública VAPID em bytes deve ter 65 bytes
+    if (!(bytes instanceof Uint8Array) || bytes.length !== 65) {
+      throw new Error("VAPID public key inválida (decode)");
+    }
+  },
+
+  async requestPermission() {
+    if (!this.supported) {
+      throw new Error('Push notifications não suportadas neste navegador');
+    }
+
+    const permission = await Notification.requestPermission();
+    return permission === 'granted';
+  },
+
+  async subscribe() {
+    try {
+      // Garantir que o Service Worker esteja registrado antes de usar PushManager
+      await registerSW();
+      const registration = await navigator.serviceWorker.ready;
+
+      // Evita erro ruidoso quando o backend não está rodando
+      const serverOk = await this.checkServer({ force: true });
+      if (!serverOk) {
+        throw new Error('Servidor de push indisponível (inicie o servidor em server/)');
+      }
+
+      const vapidKey = await this.getVapidPublicKey();
+      
+      if (!vapidKey) {
+        throw new Error('Não foi possível obter VAPID key do servidor');
+      }
+
+      const applicationServerKey = this.urlBase64ToUint8Array(vapidKey);
+
+      this.subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey
+      });
+
+      // Enviar subscription para o backend
+      await fetch(`${PUSH_SERVER_URL}/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this.subscription)
+      });
+
+      // Salvar no state
+      if (!AppState.settings) AppState.settings = {};
+      if (!AppState.settings.pushNotifications) {
+        AppState.settings.pushNotifications = {};
+      }
+      AppState.settings.pushNotifications.enabled = true;
+      AppState.settings.pushNotifications.endpoint = this.subscription.endpoint;
+      saveState();
+
+      return true;
+    } catch (e) {
+      // Se a key veio ruim (cache/servidor antigo), limpar cache e tentar 1 vez
+      const msg = String(e?.message || "");
+      const isInvalidKey = msg.includes("applicationServerKey") || msg.includes("VAPID public key");
+      if (isInvalidKey && this.vapidPublicKey) {
+        this.vapidPublicKey = null;
+        try {
+          await registerSW();
+          const registration = await navigator.serviceWorker.ready;
+          const freshKey = await this.getVapidPublicKey();
+          if (!freshKey) throw e;
+          const applicationServerKey = this.urlBase64ToUint8Array(freshKey);
+          this.assertValidVapidPublicKey(freshKey);
+          this.subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey
+          });
+
+          await fetch(`${PUSH_SERVER_URL}/subscribe`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(this.subscription)
+          });
+
+          if (!AppState.settings) AppState.settings = {};
+          if (!AppState.settings.pushNotifications) {
+            AppState.settings.pushNotifications = {};
+          }
+          AppState.settings.pushNotifications.enabled = true;
+          AppState.settings.pushNotifications.endpoint = this.subscription.endpoint;
+          saveState();
+
+          return true;
+        } catch {
+          // cai pro erro original
+        }
+      }
+      console.error('Erro ao criar subscription:', e);
+      throw e;
+    }
+  },
+
+  async unsubscribe() {
+    try {
+      if (this.subscription) {
+        await this.subscription.unsubscribe();
+        
+        // Remover do backend
+        await fetch(`${PUSH_SERVER_URL}/unsubscribe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: this.subscription.endpoint })
+        });
+
+        this.subscription = null;
+      }
+
+      if (AppState.settings?.pushNotifications) {
+        AppState.settings.pushNotifications.enabled = false;
+        delete AppState.settings.pushNotifications.endpoint;
+        saveState();
+      }
+
+      return true;
+    } catch (e) {
+      console.error('Erro ao remover subscription:', e);
+      throw e;
+    }
+  },
+
+  async getSubscription() {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      this.subscription = await registration.pushManager.getSubscription();
+      return this.subscription;
+    } catch (e) {
+      console.error('Erro ao buscar subscription:', e);
+      return null;
+    }
+  },
+
+  async sendTestPush() {
+    try {
+      const serverOk = await this.checkServer({ force: true });
+      if (!serverOk) {
+        throw new Error('Servidor de push indisponível (inicie o servidor em server/)');
+      }
+
+      const sub = await this.getSubscription();
+      if (!sub) {
+        throw new Error('Nenhuma subscription ativa');
+      }
+
+      await fetch(`${PUSH_SERVER_URL}/send-test-push`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: sub.endpoint,
+          title: '🐶 ScoobyCare - Teste',
+          body: 'Você tem pendências! Abra para ver.',
+          route: 'alerts'
+        })
+      });
+
+      return true;
+    } catch (e) {
+      console.error('Erro ao enviar push de teste:', e);
+      throw e;
+    }
+  }
+};
+
+/* ===============================
+   PUSH INBOX (lidas / não lidas)
+================================ */
+const PushInbox = {
+  maxItems: 20,
+  _autoOpenPending: false,
+
+  ensureState() {
+    if (!AppState.settings) AppState.settings = {};
+    if (!AppState.settings.pushInbox) {
+      AppState.settings.pushInbox = { items: [] };
+    }
+    if (!Array.isArray(AppState.settings.pushInbox.items)) {
+      AppState.settings.pushInbox.items = [];
+    }
+  },
+
+  getItems() {
+    this.ensureState();
+    return AppState.settings.pushInbox.items;
+  },
+
+  setItems(items) {
+    this.ensureState();
+    AppState.settings.pushInbox.items = Array.isArray(items) ? items.slice(0, this.maxItems) : [];
+    saveState();
+    this.render();
+    this.updateBadge();
+  },
+
+  unreadCount() {
+    return this.getItems().filter(i => i && i.read === false).length;
+  },
+
+  addItem(item) {
+    this.ensureState();
+    const items = this.getItems();
+    const safe = {
+      id: item?.id || String(Date.now()),
+      title: String(item?.title || 'ScoobyCare'),
+      body: String(item?.body || ''),
+      route: String(item?.route || 'home'),
+      receivedAt: item?.receivedAt || Date.now(),
+      read: item?.read === true ? true : false
+    };
+
+    // evitar duplicatas por id
+    const without = items.filter(i => i?.id !== safe.id);
+    without.unshift(safe);
+    AppState.settings.pushInbox.items = without.slice(0, this.maxItems);
+    saveState();
+    this.render();
+    this.updateBadge();
+  },
+
+  markAllRead({ syncSW = false } = {}) {
+    this.ensureState();
+    let changed = false;
+    for (const item of AppState.settings.pushInbox.items) {
+      if (item && item.read === false) {
+        item.read = true;
+        changed = true;
+      }
+    }
+    if (changed) {
+      saveState();
+      this.render();
+      this.updateBadge();
+    }
+
+    if (syncSW) {
+      this.postToSW({ type: 'mark-all-read' });
+    }
+  },
+
+  updateBadge() {
+    const count = this.unreadCount();
+    AppBadge.set(count);
+  },
+
+  postToSW(message) {
+    try {
+      if (!navigator.serviceWorker) return;
+      navigator.serviceWorker.ready.then(() => {
+        const ctrl = navigator.serviceWorker.controller;
+        if (ctrl) ctrl.postMessage(message);
+      });
+    } catch {
+      // ignore
+    }
+  },
+
+  syncFromSW() {
+    this.postToSW({ type: 'get-push-inbox' });
+  },
+
+  onSWItems(items) {
+    // itens vindos do SW já incluem read/unread
+    this.setItems(items);
+
+    // Ao abrir o app pelo ícone (hash vazio ou #home), ir para a rota da última notificação.
+    try {
+      if (this._autoOpenPending) {
+        this._autoOpenPending = false;
+        const current = (typeof getRouteFromHash === 'function') ? getRouteFromHash() : 'home';
+        if (!current || current === 'home') {
+          const last = this.getItems()?.[0];
+          const route = String(last?.route || last?.data?.route || '').trim();
+          if (route) {
+            window.location.hash = `#${route}`;
+          }
+        }
+      }
+    } catch {}
+
+    // Se o app está visível, considera como “vistas” e limpa badge.
+    try {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'hidden') {
+        this.markAllRead({ syncSW: true });
+      }
+    } catch {}
+  },
+
+  onPushReceived(payload) {
+    // quando o app estiver aberto e receber postMessage do SW
+    const data = payload?.data || payload;
+    this.addItem({
+      id: data?.id,
+      title: data?.title,
+      body: data?.body,
+      route: data?.route || data?.data?.route,
+      receivedAt: data?.receivedAt,
+      read: false
+    });
+  },
+
+  render() {
+    const field = document.getElementById('push-inbox-field');
+    const list = document.getElementById('push-inbox-list');
+    if (!field || !list) return;
+
+    const items = this.getItems();
+    if (!items.length) {
+      field.hidden = true;
+      list.innerHTML = '';
+      return;
+    }
+
+    field.hidden = false;
+
+    list.innerHTML = items.map((it) => {
+      const when = new Date(it.receivedAt || Date.now());
+      const whenText = isNaN(when.getTime()) ? '' : when.toLocaleString('pt-BR');
+      const title = escapeHTML(it.title || 'ScoobyCare');
+      const body = escapeHTML(it.body || '');
+      const meta = `${whenText}${it.read ? ' · lida' : ' · não lida'}`;
+      return `
+        <div class="list-item" style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+          <div>
+            <div style="font-weight:600;">${title}</div>
+            <div class="small-text">${body}</div>
+            <div class="hint">${escapeHTML(meta)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+};
+
+/* ===============================
+   BADGING API - Badge no ícone
+================================ */
+const AppBadge = {
+  supported: 'setAppBadge' in navigator,
+
+  set(count) {
+    if (!this.supported) return;
+    
+    try {
+      if (count > 0) {
+        navigator.setAppBadge(count);
+      } else {
+        this.clear();
+      }
+    } catch (e) {
+      console.warn('Erro ao definir badge:', e);
+    }
+  },
+
+  clear() {
+    if (!this.supported) return;
+    
+    try {
+      navigator.clearAppBadge();
+    } catch (e) {
+      console.warn('Erro ao limpar badge:', e);
+    }
+  },
+
+  updateFromEvents(events) {
+    const alertDays = AppState.settings?.alertDaysAhead || 7;
+    const urgent = events.filter(e => {
+      if (!e.date) return false;
+      const diff = daysBetween(todayISO(), e.date);
+      return diff < 0 || (diff >= 0 && diff <= alertDays);
+    });
+
+    // (mantido para uso interno caso você queira voltar a usar badge por pendências)
+    this.set(urgent.length);
+  }
+};
 
 /* -------------------------------
    Datas (SEM bug UTC no Brasil)
@@ -316,20 +974,202 @@ const shouldPlaySoundFor = (events) => {
 };
 
 const maybePlaySoundAlerts = async (events) => {
-  const s = AppState.settings?.soundAlerts || {};
-  const verdict = shouldPlaySoundFor(events);
-  if (!verdict.should) return;
-
-  for (const e of verdict.toPlay) {
-    const ok = await playPattern(e.kind);
-    if (ok) {
-      s.lastPlayedByItemISO = s.lastPlayedByItemISO || {};
-      s.lastPlayedByItemISO[e.id] = todayISO();
-      AppState.settings.soundAlerts = s;
-      saveState();
-      showToast(`🔔 Alerta: ${e.title}`);
-      await sleep(180);
+  // Usar novo módulo BarkSounds
+  if (BarkSounds.enabled && BarkSounds.unlocked) {
+    const played = await BarkSounds.playForEvents(events);
+    if (played) {
+      showToast(`🐶 Latido! Há eventos pendentes`);
     }
+  }
+};
+
+/* ===============================
+   Settings - Notificações
+================================ */
+const attachNotificationEvents = () => {
+  // Toggle Bark Sounds
+  const toggleBark = document.getElementById("toggle-bark-sounds");
+  if (toggleBark) {
+    toggleBark.checked = AppState.settings?.barkSounds?.enabled || false;
+    toggleBark.addEventListener("change", async (e) => {
+      BarkSounds.enabled = e.target.checked;
+      
+      if (!AppState.settings) AppState.settings = {};
+      if (!AppState.settings.barkSounds) AppState.settings.barkSounds = {};
+      AppState.settings.barkSounds.enabled = e.target.checked;
+      
+      if (e.target.checked) {
+        // Tentar desbloquear áudio com interação do usuário
+        const unlocked = await BarkSounds.unlock();
+        if (!unlocked) {
+          showToast("⚠️ Não foi possível habilitar áudio");
+          e.target.checked = false;
+          AppState.settings.barkSounds.enabled = false;
+        }
+      }
+      
+      saveState();
+    });
+  }
+
+  // Test Bark Sound
+  const btnTestBark = document.getElementById("btn-test-bark");
+  if (btnTestBark) {
+    btnTestBark.addEventListener("click", async () => {
+      if (!BarkSounds.enabled) {
+        showToast("Ativa os sons de latido primeiro!");
+        return;
+      }
+      
+      if (!BarkSounds.unlocked) {
+        const unlocked = await BarkSounds.unlock();
+        if (!unlocked) {
+          showToast("⚠️ Não foi possível reproduzir áudio");
+          return;
+        }
+      }
+      
+      btnTestBark.disabled = true;
+      await BarkSounds.play('med');
+      await sleep(300);
+      btnTestBark.disabled = false;
+      showToast("🐶 Au au! Latido de teste!");
+    });
+  }
+
+  // Toggle Push Notifications
+  const togglePush = document.getElementById("toggle-push-notifications");
+  const pushStatusText = document.getElementById("push-status-text");
+  const btnMarkPushRead = document.getElementById("btn-mark-push-read");
+
+  // Inbox UI
+  try {
+    PushInbox.ensureState();
+    PushInbox.render();
+    PushInbox.updateBadge();
+  } catch {}
+
+  if (btnMarkPushRead) {
+    btnMarkPushRead.addEventListener('click', () => {
+      PushInbox.markAllRead({ syncSW: true });
+      showToast('✅ Notificações marcadas como lidas');
+    });
+  }
+  if (togglePush) {
+    togglePush.checked = AppState.settings?.pushNotifications?.enabled || false;
+
+    const refreshPushUI = async () => {
+      if (!pushStatusText) return;
+
+      if (!PushNotifications.supported) {
+        pushStatusText.textContent = "Status: Indisponível neste navegador";
+        return;
+      }
+
+      const permission = Notification.permission;
+      if (permission === 'denied') {
+        pushStatusText.textContent = "Status: Permissão negada";
+        return;
+      }
+
+      const serverOk = await PushNotifications.checkServer();
+      if (!serverOk) {
+        pushStatusText.textContent = "Status: Servidor de push offline";
+        return;
+      }
+
+      pushStatusText.textContent = togglePush.checked ? "Status: Ativado" : "Status: Pronto para ativar";
+    };
+
+    // Primeira renderização do status (sem travar o fluxo)
+    refreshPushUI();
+    
+    togglePush.addEventListener("change", async (e) => {
+      try {
+        if (e.target.checked) {
+          // Checar backend antes de pedir permissão/subscrever
+          const serverOk = await PushNotifications.checkServer({ force: true });
+          if (!serverOk) {
+            showToast("⚠️ Servidor de push offline. Inicie o servidor (pasta server)");
+            e.target.checked = false;
+            await refreshPushUI();
+            return;
+          }
+
+          // Pedir permissão
+          const granted = await PushNotifications.requestPermission();
+          if (!granted) {
+            showToast("❌ Permissão para notificações negada");
+            e.target.checked = false;
+            await refreshPushUI();
+            return;
+          }
+          
+          // Fazer subscribe
+          showToast("⏳ Ativando push notifications...");
+          await PushNotifications.subscribe();
+          showToast("✅ Push notifications ativadas!");
+          await refreshPushUI();
+        } else {
+          // Fazer unsubscribe
+          showToast("⏳ Desativando push notifications...");
+          await PushNotifications.unsubscribe();
+          showToast("❌ Push notifications desativadas");
+          await refreshPushUI();
+        }
+      } catch (err) {
+        console.error('Erro com push:', err);
+        showToast(`❌ Erro: ${err.message}`);
+        e.target.checked = !e.target.checked;
+        await refreshPushUI();
+      }
+    });
+  }
+
+  // Test Push Notification
+  const btnTestPush = document.getElementById("btn-test-push");
+  if (btnTestPush) {
+    btnTestPush.addEventListener("click", async () => {
+      if (!AppState.settings?.pushNotifications?.enabled) {
+        showToast("Ativa as push notifications primeiro!");
+        return;
+      }
+      
+      try {
+        const serverOk = await PushNotifications.checkServer({ force: true });
+        if (!serverOk) {
+          showToast("⚠️ Servidor de push offline. Inicie o servidor (pasta server)");
+          return;
+        }
+
+        btnTestPush.disabled = true;
+        showToast("⏳ Enviando push de teste...");
+        await PushNotifications.sendTestPush();
+        showToast("📲 Push enviado! Verifique a notificação");
+      } catch (err) {
+        showToast(`❌ Erro: ${err.message}`);
+      } finally {
+        btnTestPush.disabled = false;
+      }
+    });
+  }
+
+  // Alert Days Ahead
+  const inputAlertDays = document.getElementById("alert-days-ahead");
+  if (inputAlertDays) {
+    const alertDays = AppState.settings?.alertDaysAhead || 7;
+    inputAlertDays.value = alertDays;
+    
+    inputAlertDays.addEventListener("change", (e) => {
+      const days = Math.max(1, Math.min(30, parseInt(e.target.value) || 7));
+      
+      if (!AppState.settings) AppState.settings = {};
+      AppState.settings.alertDaysAhead = days;
+      saveState();
+      
+      showToast(`Alertas com ${days} dias de antecedência`);
+      renderAll(); // Renderizar novamente para atualizar badges
+    });
   }
 };
 
@@ -356,6 +1196,15 @@ const downloadTextFile = (filename, text, mime = "text/plain") => {
   a.remove();
   URL.revokeObjectURL(url);
 };
+
+// escape simples para HTML (usado no inbox de push)
+const escapeHTML = (s) =>
+  String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 
 const buildICS = (events, calendarName = "ScoobyCare") => {
   const dtstamp = ymdToICSDate(todayISO()) + "T000000Z";
@@ -668,7 +1517,19 @@ const seedState = () => ({
       ]
     }
   ],
-  settings: { notifications: { enabled: true }, soundAlerts: { enabled: false, lastPlayedISO: null, unlocked: false } }
+  settings: {
+    notifications: { enabled: true },
+    soundAlerts: { enabled: false, lastPlayedISO: null, unlocked: false },
+    barkSounds: {
+      enabled: false,
+      lastBarkByItem: {}
+    },
+    pushNotifications: {
+      enabled: false,
+      endpoint: null
+    },
+    alertDaysAhead: 7
+  }
 });
 
 const loadState = () => {
@@ -706,9 +1567,8 @@ const setActiveRoute = (route) => {
     v.classList.toggle("hidden", name !== route);
   });
 
-  document.querySelectorAll(".tab-link").forEach((a) => {
-    a.classList.toggle("active", a.dataset.route === route);
-  });
+  setActiveLinkByRoute(route);
+  setScreenTitle(route);
 };
 
 const getRouteFromHash = () => {
@@ -1515,6 +2375,107 @@ const attachEvents = () => {
 };
 
 /* -------------------------------
+   Sidebar & Navigation
+--------------------------------- */
+const ROUTE_TITLES = {
+  home: "Dashboard",
+  peso: "Peso",
+  meds: "Remédios",
+  vaccines: "Vacinas",
+  routines: "Rotinas",
+  food: "Comida",
+  history: "Histórico",
+  settings: "Ajustes",
+  alerts: "Pendências"
+};
+
+const openSidebar = () => {
+  const sidebar = document.getElementById("sidebar");
+  const overlay = document.getElementById("overlay");
+  const menuToggle = document.getElementById("menu-toggle");
+  
+  if (!sidebar) return;
+  
+  sidebar.classList.add("open");
+  overlay?.classList.remove("hidden");
+  overlay?.classList.add("visible");
+  menuToggle?.classList.add("open");
+  menuToggle?.setAttribute("aria-expanded", "true");
+  
+  // Focar no primeiro link
+  const firstLink = sidebar.querySelector(".sidebar-link");
+  firstLink?.focus();
+};
+
+const closeSidebar = () => {
+  const sidebar = document.getElementById("sidebar");
+  const overlay = document.getElementById("overlay");
+  const menuToggle = document.getElementById("menu-toggle");
+  
+  if (!sidebar) return;
+  
+  sidebar.classList.remove("open");
+  overlay?.classList.remove("visible");
+  overlay?.classList.add("hidden");
+  menuToggle?.classList.remove("open");
+  menuToggle?.setAttribute("aria-expanded", "false");
+  
+  // Retornar foco ao botão
+  menuToggle?.focus();
+};
+
+const toggleSidebar = () => {
+  const sidebar = document.getElementById("sidebar");
+  if (sidebar?.classList.contains("open")) {
+    closeSidebar();
+  } else {
+    openSidebar();
+  }
+};
+
+const setActiveLinkByRoute = (route) => {
+  document.querySelectorAll(".sidebar-link").forEach((link) => {
+    const linkRoute = link.getAttribute("data-route");
+    link.classList.toggle("active", linkRoute === route);
+  });
+};
+
+const setScreenTitle = (route) => {
+  const titleEl = document.getElementById("screen-title");
+  if (titleEl) {
+    titleEl.textContent = ROUTE_TITLES[route] || "ScoobyCare";
+  }
+};
+
+const initSidebar = () => {
+  const menuToggle = document.getElementById("menu-toggle");
+  const overlay = document.getElementById("overlay");
+  const sidebarLinks = document.querySelectorAll(".sidebar-link");
+  
+  // Toggle menu
+  menuToggle?.addEventListener("click", toggleSidebar);
+  
+  // Fechar ao clicar no overlay
+  overlay?.addEventListener("click", closeSidebar);
+  
+  // Fechar com ESC
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeSidebar();
+    }
+  });
+  
+  // Fechar ao clicar em link (mobile)
+  sidebarLinks.forEach((link) => {
+    link.addEventListener("click", () => {
+      if (window.innerWidth <= 768) {
+        setTimeout(closeSidebar, 100);
+      }
+    });
+  });
+};
+
+/* -------------------------------
    Service Worker
 --------------------------------- */
 const registerSW = async () => {
@@ -1532,19 +2493,91 @@ const registerSW = async () => {
 --------------------------------- */
 const boot = async () => {
   AppState = loadState();
+
+  // Registrar SW o quanto antes (evita corrida com PushManager)
+  await registerSW();
+  
+  // Inicializar módulos de notificações
+  BarkSounds.init();
+  PushNotifications.init();
+  PushInbox.ensureState();
+  
+  // Carregar configurações salvas
+  if (AppState.settings?.barkSounds?.enabled) {
+    BarkSounds.enabled = true;
+  }
+  
+  // Verificar subscription de push
+  if (AppState.settings?.pushNotifications?.enabled) {
+    const sub = await PushNotifications.getSubscription();
+    if (sub) {
+      PushNotifications.subscription = sub;
+    } else {
+      // Subscription perdida, desabilitar
+      AppState.settings.pushNotifications.enabled = false;
+      saveState();
+    }
+  }
+  
   setActiveRoute(getRouteFromHash());
+  initSidebar();
   attachEvents();
+  attachNotificationEvents();
   renderAll();
 
-  // checagem periódica de alertas (som + status) enquanto o app estiver aberto
+  const refreshBadgeNow = () => {
+    try {
+      PushInbox.updateBadge();
+    } catch {}
+  };
+
+  // Sincroniza histórico do SW (push recebidos com app fechado)
+  try {
+    PushInbox._autoOpenPending = true;
+    PushInbox.syncFromSW();
+  } catch {}
+
+  // Ao abrir o app, considera notificações como vistas e zera o badge
+  try {
+    PushInbox.markAllRead({ syncSW: true });
+  } catch {}
+
+  refreshBadgeNow();
+
+  // Recalcular badge ao voltar para a aba/janela
+  window.addEventListener('focus', refreshBadgeNow);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshBadgeNow();
+  });
+
+  // Mensagens do SW (inbox / push recebido / etc.)
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      const type = event?.data?.type;
+      if (type === 'push-inbox-items') {
+        PushInbox.onSWItems(event?.data?.items);
+        return;
+      }
+      if (type === 'push-received') {
+        PushInbox.onPushReceived(event?.data?.payload);
+        return;
+      }
+      if (type === 'notification-clicked' || type === 'refresh-badge') {
+        refreshBadgeNow();
+        return;
+      }
+    });
+  }
+
+  // checagem periódica de alertas (som + badge + status) enquanto o app estiver aberto
   window.clearInterval(boot._alertTick);
   boot._alertTick = window.setInterval(() => {
     try {
       const evts = collectUpcoming(getPet());
       maybePlaySoundAlerts(evts);
+      PushInbox.updateBadge();
     } catch {}
   }, 60000);
-  await registerSW();
 
   // marca salvo
   const sync = document.getElementById("sync-status");
