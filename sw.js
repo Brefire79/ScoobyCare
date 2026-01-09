@@ -1,13 +1,20 @@
 // ScoobyCare — sw.js (offline cache + push notifications)
-const CACHE_NAME = "scoobycare-cache-v8";
-const ASSETS = [
+const CACHE_NAME = "scoobycare-cache-v9";
+
+// Assets essenciais: não podem faltar na instalação do app.
+// Observação: o install NÃO deve falhar mesmo se um asset estiver faltando.
+const CORE_ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./manifest.json",
   "./icons/icon-192.png",
-  "./icons/icon-512.png",
+  "./icons/icon-512.png"
+];
+
+// Assets opcionais: cacheia se existir; se falhar (404), apenas loga e segue.
+const OPTIONAL_ASSETS = [
   "./assets/bark-agudo.mp3",
   "./assets/bark-grave.mp3",
   "./assets/bark-curto.mp3"
@@ -15,15 +22,47 @@ const ASSETS = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+
+      const cacheOne = async (path, { optional } = { optional: false }) => {
+        try {
+          const request = new Request(path, { cache: "reload" });
+          const response = await fetch(request);
+          if (!response || !response.ok) {
+            throw new Error(`HTTP ${response?.status || "(sem status)"}`);
+          }
+          await cache.put(request, response);
+          return true;
+        } catch (err) {
+          const label = optional ? "optional" : "core";
+          console.warn(`[SW] Cache skip (${label}): ${path}`, err);
+          return false;
+        }
+      };
+
+      const tasks = [
+        ...CORE_ASSETS.map((p) => cacheOne(p, { optional: false })),
+        ...OPTIONAL_ASSETS.map((p) => cacheOne(p, { optional: true }))
+      ];
+
+      await Promise.allSettled(tasks);
+      await self.skipWaiting();
+    })()
   );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.map((k) => (k === CACHE_NAME ? null : caches.delete(k))))
-    ).then(() => self.clients.claim())
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((k) => k !== CACHE_NAME)
+          .map((k) => caches.delete(k))
+      );
+      await self.clients.claim();
+    })()
   );
 });
 
@@ -248,9 +287,9 @@ self.addEventListener('notificationclick', (event) => {
     self.registration.clearAppBadge();
   }
 
-  const route = event.notification.data?.route || 'home';
   const pushId = event.notification.data?.id;
-  const urlToOpen = new URL(`/#${route}`, self.location.origin).href;
+  const dataUrl = event.notification.data?.url;
+  const targetUrl = new URL(dataUrl || '/#alerts', self.location.origin).href;
 
   event.waitUntil(
     (async () => {
@@ -272,15 +311,27 @@ self.addEventListener('notificationclick', (event) => {
       } catch {}
 
       const clientList = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-      // Se já tem janela aberta, focar nela
-      for (const client of clientList) {
-        if (client.url === urlToOpen && 'focus' in client) {
-          return client.focus();
-        }
+
+      // Se já existe alguma janela do app, focar e navegar para a rota desejada.
+      const firstClient = clientList && clientList.length ? clientList[0] : null;
+      if (firstClient && 'focus' in firstClient) {
+        try {
+          await firstClient.focus();
+        } catch {}
+
+        // Navega se suportado e se necessário
+        try {
+          if ('navigate' in firstClient && firstClient.url !== targetUrl) {
+            await firstClient.navigate(targetUrl);
+          }
+        } catch {}
+
+        return;
       }
-      // Se não, abrir nova janela
+
+      // Se não existe janela, abre uma nova.
       if (clients.openWindow) {
-        return clients.openWindow(urlToOpen);
+        return clients.openWindow(targetUrl);
       }
     })()
   );

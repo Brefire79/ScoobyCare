@@ -7,7 +7,38 @@
 
 const STORAGE_KEY = "scoobycare_state_v1";
 const ALERT_SOON_DAYS = 7;
-const PUSH_SERVER_URL = "http://localhost:3001";
+const PUSH_SERVER_DEFAULT_PROD_URL = "https://SEU_BACKEND_AQUI";
+const PUSH_SERVER_URL_STORAGE_KEY = "scoobycare_push_server_url_v1";
+
+const normalizeServerUrl = (value) => {
+  const str = String(value || "").trim();
+  return str.replace(/\/+$/g, "");
+};
+
+const isLocalhostHost = () => {
+  const h = String(location.hostname || "").toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+};
+
+const getPushServerUrl = () => {
+  if (isLocalhostHost()) return "http://localhost:3001";
+  const stored = normalizeServerUrl(localStorage.getItem(PUSH_SERVER_URL_STORAGE_KEY));
+  return stored || normalizeServerUrl(PUSH_SERVER_DEFAULT_PROD_URL);
+};
+
+const assertPushServerUrlAllowed = (serverUrl) => {
+  const pageIsHttps = String(location.protocol || "").toLowerCase() === "https:";
+  if (pageIsHttps && /^http:\/\//i.test(serverUrl)) {
+    throw new Error("Backend de push precisa ser HTTPS em produção");
+  }
+};
+
+const getPushServerUrlOrThrow = () => {
+  const url = getPushServerUrl();
+  if (!url) throw new Error("URL do backend de push não configurada");
+  assertPushServerUrlAllowed(url);
+  return url;
+};
 
 let AppState = null;
 
@@ -213,6 +244,14 @@ const PushNotifications = {
     return this.supported;
   },
 
+  setStatusText(mode) {
+    const el = document.getElementById("push-status-text");
+    if (!el) return;
+    if (mode === "activated") el.textContent = "Status: Ativado ✅";
+    else if (mode === "disabled") el.textContent = "Status: Desativado";
+    else el.textContent = "Status: Erro (ver detalhes)";
+  },
+
   async checkServer({ force = false, timeoutMs = 1500 } = {}) {
     if (!force && this.serverReachable !== null && (Date.now() - this.lastServerCheckAt) < 15000) {
       return this.serverReachable;
@@ -222,10 +261,11 @@ const PushNotifications = {
     this.lastServerError = null;
 
     try {
+      const serverUrl = getPushServerUrlOrThrow();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-      const response = await fetch(`${PUSH_SERVER_URL}/vapid-public-key`, {
+      const response = await fetch(`${serverUrl}/vapid-public-key`, {
         cache: "no-store",
         signal: controller.signal
       });
@@ -233,7 +273,7 @@ const PushNotifications = {
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      const key = data?.publicKey;
+      const key = String(data?.publicKey ?? "").trim();
       this.assertValidVapidPublicKey(key);
 
       this.serverReachable = true;
@@ -248,21 +288,18 @@ const PushNotifications = {
   async getVapidPublicKey() {
     if (this.vapidPublicKey) return this.vapidPublicKey;
 
-    try {
-      const response = await fetch(`${PUSH_SERVER_URL}/vapid-public-key`, { cache: "no-store" });
-      const data = await response.json();
-      const key = data?.publicKey;
-
-      // valida e só então cacheia
-      this.assertValidVapidPublicKey(key);
-      this.vapidPublicKey = key;
-      return key;
-    } catch (e) {
-      this.serverReachable = false;
-      this.lastServerError = e;
-      console.error('Erro ao buscar VAPID key:', e);
-      return null;
+    const serverUrl = getPushServerUrlOrThrow();
+    const response = await fetch(`${serverUrl}/vapid-public-key`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Falha ao obter VAPID key (HTTP ${response.status})`);
     }
+    const data = await response.json();
+    const key = String(data?.publicKey ?? "").trim();
+
+    // valida e só então cacheia
+    this.assertValidVapidPublicKey(key);
+    this.vapidPublicKey = key;
+    return key;
   },
 
   urlBase64ToUint8Array(base64String) {
@@ -282,11 +319,18 @@ const PushNotifications = {
 
   assertValidVapidPublicKey(publicKey) {
     if (typeof publicKey !== "string") throw new Error("VAPID public key inválida (tipo)");
+    publicKey = publicKey.trim();
+    if (!publicKey) throw new Error("VAPID public key vazia");
     // VAPID public key (base64url) normalmente ~87 chars
     if (publicKey.length < 80) throw new Error("VAPID public key inválida (tamanho)");
     if (!/^[A-Za-z0-9_-]+$/.test(publicKey)) throw new Error("VAPID public key inválida (formato)");
 
-    const bytes = this.urlBase64ToUint8Array(publicKey);
+    let bytes;
+    try {
+      bytes = this.urlBase64ToUint8Array(publicKey);
+    } catch {
+      throw new Error("VAPID public key inválida (decode)");
+    }
     // A chave pública VAPID em bytes deve ter 65 bytes
     if (!(bytes instanceof Uint8Array) || bytes.length !== 65) {
       throw new Error("VAPID public key inválida (decode)");
@@ -306,7 +350,13 @@ const PushNotifications = {
     try {
       // Garantir que o Service Worker esteja registrado antes de usar PushManager
       await registerSW();
+      if (!navigator.serviceWorker) {
+        throw new Error("Service Worker indisponível");
+      }
       const registration = await navigator.serviceWorker.ready;
+      if (!registration) throw new Error("Service Worker não está pronto");
+
+      const serverUrl = getPushServerUrlOrThrow();
 
       // Evita erro ruidoso quando o backend não está rodando
       const serverOk = await this.checkServer({ force: true });
@@ -320,7 +370,13 @@ const PushNotifications = {
         throw new Error('Não foi possível obter VAPID key do servidor');
       }
 
-      const applicationServerKey = this.urlBase64ToUint8Array(vapidKey);
+      let applicationServerKey;
+      try {
+        // VAPID: base64url -> Uint8Array
+        applicationServerKey = this.urlBase64ToUint8Array(String(vapidKey).trim());
+      } catch {
+        throw new Error("VAPID public key inválida (não foi possível decodificar)");
+      }
 
       this.subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
@@ -328,11 +384,14 @@ const PushNotifications = {
       });
 
       // Enviar subscription para o backend
-      await fetch(`${PUSH_SERVER_URL}/subscribe`, {
+      const subResp = await fetch(`${serverUrl}/subscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(this.subscription)
       });
+      if (!subResp.ok) {
+        throw new Error(`Falha ao registrar subscription no backend (HTTP ${subResp.status})`);
+      }
 
       // Salvar no state
       if (!AppState.settings) AppState.settings = {};
@@ -343,8 +402,11 @@ const PushNotifications = {
       AppState.settings.pushNotifications.endpoint = this.subscription.endpoint;
       saveState();
 
+      this.setStatusText("activated");
+
       return true;
     } catch (e) {
+      this.setStatusText("error");
       // Se a key veio ruim (cache/servidor antigo), limpar cache e tentar 1 vez
       const msg = String(e?.message || "");
       const isInvalidKey = msg.includes("applicationServerKey") || msg.includes("VAPID public key");
@@ -353,20 +415,29 @@ const PushNotifications = {
         try {
           await registerSW();
           const registration = await navigator.serviceWorker.ready;
+          const serverUrl = getPushServerUrlOrThrow();
           const freshKey = await this.getVapidPublicKey();
           if (!freshKey) throw e;
-          const applicationServerKey = this.urlBase64ToUint8Array(freshKey);
+          let applicationServerKey;
+          try {
+            applicationServerKey = this.urlBase64ToUint8Array(String(freshKey).trim());
+          } catch {
+            throw new Error("VAPID public key inválida (não foi possível decodificar)");
+          }
           this.assertValidVapidPublicKey(freshKey);
           this.subscription = await registration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey
           });
 
-          await fetch(`${PUSH_SERVER_URL}/subscribe`, {
+          const subResp = await fetch(`${serverUrl}/subscribe`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(this.subscription)
           });
+          if (!subResp.ok) {
+            throw new Error(`Falha ao registrar subscription no backend (HTTP ${subResp.status})`);
+          }
 
           if (!AppState.settings) AppState.settings = {};
           if (!AppState.settings.pushNotifications) {
@@ -375,6 +446,8 @@ const PushNotifications = {
           AppState.settings.pushNotifications.enabled = true;
           AppState.settings.pushNotifications.endpoint = this.subscription.endpoint;
           saveState();
+
+          this.setStatusText("activated");
 
           return true;
         } catch {
@@ -388,15 +461,19 @@ const PushNotifications = {
 
   async unsubscribe() {
     try {
+      const serverUrl = getPushServerUrlOrThrow();
       if (this.subscription) {
         await this.subscription.unsubscribe();
         
         // Remover do backend
-        await fetch(`${PUSH_SERVER_URL}/unsubscribe`, {
+        const unsubResp = await fetch(`${serverUrl}/unsubscribe`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ endpoint: this.subscription.endpoint })
         });
+        if (!unsubResp.ok) {
+          throw new Error(`Falha ao remover subscription no backend (HTTP ${unsubResp.status})`);
+        }
 
         this.subscription = null;
       }
@@ -407,8 +484,11 @@ const PushNotifications = {
         saveState();
       }
 
+      this.setStatusText("disabled");
+
       return true;
     } catch (e) {
+      this.setStatusText("error");
       console.error('Erro ao remover subscription:', e);
       throw e;
     }
@@ -427,6 +507,7 @@ const PushNotifications = {
 
   async sendTestPush() {
     try {
+      const serverUrl = getPushServerUrlOrThrow();
       const serverOk = await this.checkServer({ force: true });
       if (!serverOk) {
         throw new Error('Servidor de push indisponível (inicie o servidor em server/)');
@@ -437,7 +518,7 @@ const PushNotifications = {
         throw new Error('Nenhuma subscription ativa');
       }
 
-      await fetch(`${PUSH_SERVER_URL}/send-test-push`, {
+      const resp = await fetch(`${serverUrl}/send-test-push`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -447,6 +528,9 @@ const PushNotifications = {
           route: 'alerts'
         })
       });
+      if (!resp.ok) {
+        throw new Error(`Falha ao enviar push de teste (HTTP ${resp.status})`);
+      }
 
       return true;
     } catch (e) {
@@ -1042,6 +1126,43 @@ const attachNotificationEvents = () => {
   const pushStatusText = document.getElementById("push-status-text");
   const btnMarkPushRead = document.getElementById("btn-mark-push-read");
 
+  // Campo para configurar URL do backend de push (PROD)
+  try {
+    const settingsCard = document.querySelector('[data-view="settings"] .card');
+    if (settingsCard && !document.getElementById('push-backend-url')) {
+      const field = document.createElement('div');
+      field.className = 'field';
+      field.id = 'push-backend-url-field';
+
+      const locked = isLocalhostHost();
+      const current = getPushServerUrl();
+
+      field.innerHTML = `
+        <label for="push-backend-url">Backend de push (URL)</label>
+        <input id="push-backend-url" type="url" placeholder="https://SEU_BACKEND_AQUI" />
+        <p class="hint">Em produção precisa ser HTTPS. No localhost, usa http://localhost:3001 automaticamente.</p>
+      `;
+
+      // Insere antes da linha de botões (se existir)
+      const actionsRow = settingsCard.querySelector('.actions-row');
+      if (actionsRow) settingsCard.insertBefore(field, actionsRow);
+      else settingsCard.appendChild(field);
+
+      const input = document.getElementById('push-backend-url');
+      if (input) {
+        input.value = current;
+        if (locked) {
+          input.disabled = true;
+        } else {
+          input.addEventListener('change', () => {
+            const val = normalizeServerUrl(input.value);
+            localStorage.setItem(PUSH_SERVER_URL_STORAGE_KEY, val);
+          });
+        }
+      }
+    }
+  } catch {}
+
   // Inbox UI
   try {
     PushInbox.ensureState();
@@ -1062,23 +1183,28 @@ const attachNotificationEvents = () => {
       if (!pushStatusText) return;
 
       if (!PushNotifications.supported) {
-        pushStatusText.textContent = "Status: Indisponível neste navegador";
+        PushNotifications.setStatusText("error");
         return;
       }
 
       const permission = Notification.permission;
       if (permission === 'denied') {
-        pushStatusText.textContent = "Status: Permissão negada";
+        PushNotifications.setStatusText("error");
         return;
       }
 
-      const serverOk = await PushNotifications.checkServer();
-      if (!serverOk) {
-        pushStatusText.textContent = "Status: Servidor de push offline";
+      try {
+        const serverOk = await PushNotifications.checkServer();
+        if (!serverOk) {
+          PushNotifications.setStatusText("error");
+          return;
+        }
+      } catch {
+        PushNotifications.setStatusText("error");
         return;
       }
 
-      pushStatusText.textContent = togglePush.checked ? "Status: Ativado" : "Status: Pronto para ativar";
+      PushNotifications.setStatusText(togglePush.checked ? "activated" : "disabled");
     };
 
     // Primeira renderização do status (sem travar o fluxo)
@@ -1087,10 +1213,22 @@ const attachNotificationEvents = () => {
     togglePush.addEventListener("change", async (e) => {
       try {
         if (e.target.checked) {
+          // Bloquear mixed content (HTTPS app -> HTTP backend)
+          try {
+            getPushServerUrlOrThrow();
+          } catch (err) {
+            PushNotifications.setStatusText("error");
+            showToast(`❌ ${err.message}`);
+            e.target.checked = false;
+            await refreshPushUI();
+            return;
+          }
+
           // Checar backend antes de pedir permissão/subscrever
           const serverOk = await PushNotifications.checkServer({ force: true });
           if (!serverOk) {
             showToast("⚠️ Servidor de push offline. Inicie o servidor (pasta server)");
+            PushNotifications.setStatusText("error");
             e.target.checked = false;
             await refreshPushUI();
             return;
@@ -1100,6 +1238,7 @@ const attachNotificationEvents = () => {
           const granted = await PushNotifications.requestPermission();
           if (!granted) {
             showToast("❌ Permissão para notificações negada");
+            PushNotifications.setStatusText("error");
             e.target.checked = false;
             await refreshPushUI();
             return;
@@ -1119,6 +1258,7 @@ const attachNotificationEvents = () => {
         }
       } catch (err) {
         console.error('Erro com push:', err);
+        PushNotifications.setStatusText("error");
         showToast(`❌ Erro: ${err.message}`);
         e.target.checked = !e.target.checked;
         await refreshPushUI();
